@@ -1,0 +1,102 @@
+@page "/"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IJobStore Store
+@inject IJobScheduler Scheduler
+@inject IJobCatalog Catalog
+
+<PageTitle>Jobs</PageTitle>
+
+<h1>Jobs</h1>
+
+<div class="card mb-4">
+    <div class="card-body d-flex align-items-end gap-2 flex-wrap">
+        <div>
+            <label class="form-label mb-1">Trigger a job</label>
+            <select class="form-select" @bind="_selectedType">
+                @foreach (var j in Catalog.Jobs)
+                {
+                    <option value="@j.TypeName">@j.DisplayName</option>
+                }
+            </select>
+        </div>
+        <button class="btn btn-primary" @onclick="TriggerAsync" disabled="@string.IsNullOrEmpty(_selectedType)">
+            Enqueue
+        </button>
+    </div>
+</div>
+
+<table class="table table-hover align-middle">
+    <thead>
+        <tr>
+            <th>Job</th><th>Status</th><th>Progress</th><th>Executor</th><th>Created</th><th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var e in _executions)
+        {
+            <tr>
+                <td><a href="/jobs/@e.Id">@e.JobName</a><br /><small class="text-muted">@e.Id</small></td>
+                <td><span class="badge @BadgeClass(e.Status)">@e.Status</span></td>
+                <td style="min-width:160px">
+                    <div class="progress" role="progressbar">
+                        <div class="progress-bar" style="width:@(e.Progress)%">@e.Progress%</div>
+                    </div>
+                    <small class="text-muted">@e.ProgressMessage</small>
+                </td>
+                <td>@e.ExecutorName</td>
+                <td><small>@e.CreatedAt.LocalDateTime.ToString("HH:mm:ss")</small></td>
+                <td>
+                    @if (!e.IsTerminal)
+                    {
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => StopAsync(e.Id)">Stop</button>
+                    }
+                </td>
+            </tr>
+        }
+        @if (_executions.Count == 0)
+        {
+            <tr><td colspan="6" class="text-center text-muted">No jobs yet — enqueue one above.</td></tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private IReadOnlyList<JobExecution> _executions = Array.Empty<JobExecution>();
+    private string? _selectedType;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _selectedType = Catalog.Jobs.FirstOrDefault()?.TypeName;
+        await RefreshAsync();
+        Store.ExecutionChanged += OnChanged;
+    }
+
+    private async Task RefreshAsync() => _executions = await Store.ListAsync();
+
+    private async void OnChanged(JobExecution _) =>
+        await InvokeAsync(async () => { await RefreshAsync(); StateHasChanged(); });
+
+    private async Task TriggerAsync()
+    {
+        if (!string.IsNullOrEmpty(_selectedType))
+            await Scheduler.EnqueueAsync(_selectedType);
+    }
+
+    private async Task StopAsync(string id)
+    {
+        await Scheduler.StopAsync(id);
+    }
+
+    private static string BadgeClass(JobStatus s) => s switch
+    {
+        JobStatus.Succeeded => "text-bg-success",
+        JobStatus.Failed => "text-bg-danger",
+        JobStatus.Running => "text-bg-primary",
+        JobStatus.Stopped => "text-bg-secondary",
+        JobStatus.Starting => "text-bg-info",
+        _ => "text-bg-light text-dark"
+    };
+
+    public void Dispose() => Store.ExecutionChanged -= OnChanged;
+}

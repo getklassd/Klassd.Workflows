@@ -1,0 +1,31 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!-- Single source of truth for package versions across the solution (pinned). -->
+  <ItemGroup>
+    <!-- Extensions / framework abstractions -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.9" />
+
+    <!-- Scheduling -->
+    <PackageVersion Include="Cronos" Version="0.13.0" />
+
+    <!-- Durable job stores -->
+    <PackageVersion Include="MongoDB.Driver" Version="3.9.0" />
+    <PackageVersion Include="Npgsql" Version="10.0.3" />
+
+    <!-- Kubernetes executor -->
+    <PackageVersion Include="KubernetesClient" Version="19.0.2" />
+
+    <!-- Artifact stores -->
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.24.2" />
+    <PackageVersion Include="Google.Cloud.Storage.V1" Version="4.15.0" />
+  </ItemGroup>
+
+</Project>

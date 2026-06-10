@@ -1,0 +1,86 @@
+@page "/jobs/{Id}"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IJobStore Store
+@inject IJobScheduler Scheduler
+
+<PageTitle>Job @Id</PageTitle>
+
+@if (_exec is null)
+{
+    <p>Job not found. <a href="/">Back to jobs</a></p>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-start">
+        <div>
+            <h1>@_exec.JobName</h1>
+            <p class="text-muted mb-1">@_exec.JobTypeName</p>
+            <p class="mb-1"><code>@_exec.Id</code> · executor: <strong>@_exec.ExecutorName</strong>
+                @if (_exec.ExecutorHandle is not null) { <span> · @_exec.ExecutorHandle</span> }
+            </p>
+        </div>
+        <div>
+            @if (!_exec.IsTerminal)
+            {
+                <button class="btn btn-outline-danger" @onclick="StopAsync">Stop job</button>
+            }
+        </div>
+    </div>
+
+    <div class="my-3">
+        <span class="badge @BadgeClass(_exec.Status) fs-6">@_exec.Status</span>
+        @if (_exec.Error is not null)
+        {
+            <span class="text-danger ms-2">@_exec.Error</span>
+        }
+    </div>
+
+    <div class="progress mb-3" role="progressbar" style="height:24px">
+        <div class="progress-bar" style="width:@(_exec.Progress)%">@_exec.Progress% @_exec.ProgressMessage</div>
+    </div>
+
+    <h5>Console</h5>
+    <pre class="bg-dark text-light p-3 rounded" style="height:420px; overflow:auto">@_logs</pre>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private JobExecution? _exec;
+    private string _logs = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Store.ExecutionChanged -= OnChanged;
+        await RefreshAsync();
+        Store.ExecutionChanged += OnChanged;
+    }
+
+    private async Task RefreshAsync()
+    {
+        _exec = await Store.GetAsync(Id);
+        if (_exec is not null)
+            lock (_exec.Logs) _logs = string.Join('\n', _exec.Logs);
+    }
+
+    private async void OnChanged(JobExecution e)
+    {
+        if (e.Id != Id) return;
+        await InvokeAsync(async () => { await RefreshAsync(); StateHasChanged(); });
+    }
+
+    private async Task StopAsync() => await Scheduler.StopAsync(Id);
+
+    private static string BadgeClass(JobStatus s) => s switch
+    {
+        JobStatus.Succeeded => "text-bg-success",
+        JobStatus.Failed => "text-bg-danger",
+        JobStatus.Running => "text-bg-primary",
+        JobStatus.Stopped => "text-bg-secondary",
+        JobStatus.Starting => "text-bg-info",
+        _ => "text-bg-light text-dark"
+    };
+
+    public void Dispose() => Store.ExecutionChanged -= OnChanged;
+}

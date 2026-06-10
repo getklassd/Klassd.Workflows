@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Klassd.Workflows.Abstractions</PackageId>
+    <Description>Core contracts for Klassd.Workflows: the IJob/IJobContext job interface, the IArtifactStore artifact-storage seam, and the worker stdout protocol. No dependencies.</Description>
+  </PropertyGroup>
+
+</Project>

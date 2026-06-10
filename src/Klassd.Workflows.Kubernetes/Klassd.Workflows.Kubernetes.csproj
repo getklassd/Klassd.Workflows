@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Klassd.Workflows.Kubernetes</PackageId>
+    <Description>Kubernetes executor for Klassd.Workflows: runs each job as a batch/v1 Job (one pod per execution) and tails its logs. AddKubernetesExecutor().</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
+    <ProjectReference Include="..\Klassd.Workflows.Core\Klassd.Workflows.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="KubernetesClient" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+
+</Project>

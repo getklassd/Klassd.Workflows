@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Klassd.Workflows.Storage.MongoDb</PackageId>
+    <Description>MongoDB-backed durable IJobStore for Klassd.Workflows (executions, recurring jobs and workflow runs as documents, append-only logs). WorkflowsBuilder.UseMongo().</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Klassd.Workflows.Core\Klassd.Workflows.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
+    <ProjectReference Include="..\Klassd.Workflows.Core\Klassd.Workflows.Core.csproj" />
+    <ProjectReference Include="..\..\samples\Klassd.Workflows.SampleJobs\Klassd.Workflows.SampleJobs.csproj" />
+    <ProjectReference Include="..\Klassd.Workflows.Artifacts.Gcs\Klassd.Workflows.Artifacts.Gcs.csproj" />
+    <ProjectReference Include="..\Klassd.Workflows.Artifacts.S3\Klassd.Workflows.Artifacts.S3.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!-- Executor-pod entrypoint (built into the worker image); not shipped as a package. -->
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+</Project>

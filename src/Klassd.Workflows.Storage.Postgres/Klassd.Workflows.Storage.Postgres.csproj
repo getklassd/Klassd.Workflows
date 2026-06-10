@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Klassd.Workflows.Storage.Postgres</PackageId>
+    <Description>PostgreSQL-backed durable IJobStore for Klassd.Workflows (executions, recurring jobs and workflow runs as jsonb, append-only logs). WorkflowsBuilder.UsePostgres().</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Klassd.Workflows.Core\Klassd.Workflows.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Klassd.Workflows.Artifacts.Gcs</PackageId>
+    <Description>Google Cloud Storage artifact store for Klassd.Workflows (IArtifactStore provider "gcs"), for passing large payloads between workflow nodes.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Cloud.Storage.V1" />
+  </ItemGroup>
+
+</Project>

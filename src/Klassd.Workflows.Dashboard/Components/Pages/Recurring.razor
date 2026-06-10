@@ -1,0 +1,64 @@
+@page "/recurring"
+@rendermode InteractiveServer
+@inject IJobStore Store
+@inject IJobScheduler Scheduler
+
+<PageTitle>Recurring jobs</PageTitle>
+
+<h1>Recurring</h1>
+<p class="text-muted">Jobs and workflows scheduled in code via
+   <code>AddOrUpdateRecurring&lt;TJob&gt;</code> / <code>AddOrUpdateRecurringWorkflow</code>.</p>
+
+<table class="table align-middle">
+    <thead>
+        <tr><th>Id</th><th>Kind</th><th>Target</th><th>Cron</th><th>Enabled</th><th>Last run</th><th></th></tr>
+    </thead>
+    <tbody>
+        @foreach (var r in _recurring)
+        {
+            <tr>
+                <td><strong>@r.Id</strong></td>
+                <td><span class="badge @(r.Kind == RecurringKind.Workflow ? "text-bg-info" : "text-bg-secondary")">@r.Kind</span></td>
+                <td><small>@r.Target</small></td>
+                <td><code>@r.Cron</code></td>
+                <td>@(r.Enabled ? "Yes" : "No")</td>
+                <td>
+                    @if (r.LastRun is { } lr)
+                    {
+                        @if (r.LastExecutionId is not null)
+                        {
+                            <a href="@LastLink(r)">@lr.LocalDateTime.ToString("HH:mm:ss")</a>
+                        }
+                        else { <span>@lr.LocalDateTime.ToString("HH:mm:ss")</span> }
+                    }
+                    else { <span class="text-muted">never</span> }
+                </td>
+                <td><button class="btn btn-sm btn-outline-primary" @onclick="() => RunNowAsync(r)">Run now</button></td>
+            </tr>
+        }
+        @if (_recurring.Count == 0)
+        {
+            <tr><td colspan="7" class="text-center text-muted">Nothing scheduled.</td></tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private IReadOnlyList<RecurringJob> _recurring = Array.Empty<RecurringJob>();
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync() => _recurring = await Store.ListRecurringAsync();
+
+    private async Task RunNowAsync(RecurringJob r)
+    {
+        if (r.Kind == RecurringKind.Workflow)
+            await Scheduler.EnqueueWorkflowAsync(r.WorkflowName);
+        else
+            await Scheduler.EnqueueAsync(r.JobTypeName, r.Arguments);
+        await RefreshAsync();
+    }
+
+    private static string LastLink(RecurringJob r) =>
+        r.Kind == RecurringKind.Workflow ? $"/workflows/runs/{r.LastExecutionId}" : $"/jobs/{r.LastExecutionId}";
+}

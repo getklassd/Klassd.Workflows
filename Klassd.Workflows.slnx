@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/Klassd.Workflows.SampleJobs/Klassd.Workflows.SampleJobs.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Klassd.Workflows.Abstractions/Klassd.Workflows.Abstractions.csproj" />
+    <Project Path="src/Klassd.Workflows.Artifacts.Gcs/Klassd.Workflows.Artifacts.Gcs.csproj" />
+    <Project Path="src/Klassd.Workflows.Artifacts.S3/Klassd.Workflows.Artifacts.S3.csproj" />
+    <Project Path="src/Klassd.Workflows.Core/Klassd.Workflows.Core.csproj" />
+    <Project Path="src/Klassd.Workflows.Dashboard/Klassd.Workflows.Dashboard.csproj" />
+    <Project Path="src/Klassd.Workflows.Kubernetes/Klassd.Workflows.Kubernetes.csproj" />
+    <Project Path="src/Klassd.Workflows.Storage.MongoDb/Klassd.Workflows.Storage.MongoDb.csproj" />
+    <Project Path="src/Klassd.Workflows.Storage.Postgres/Klassd.Workflows.Storage.Postgres.csproj" />
+    <Project Path="src/Klassd.Workflows.Worker/Klassd.Workflows.Worker.csproj" />
+  </Folder>
+</Solution>

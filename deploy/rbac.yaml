@@ -1,0 +1,38 @@
+# RBAC the scheduler (dashboard) pod needs to create/watch/delete per-job Jobs
+# and read their pod logs. Apply when running the dashboard inside the cluster
+# with Klassd.Workflows:InCluster=true.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: klassd-workflows-scheduler
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: klassd-workflows-scheduler
+  namespace: default
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: klassd-workflows-scheduler
+  namespace: default
+subjects:
+  - kind: ServiceAccount
+    name: klassd-workflows-scheduler
+    namespace: default
+roleRef:
+  kind: Role
+  name: klassd-workflows-scheduler
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,221 @@
+@page "/workflows/runs/{Id}"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IJobStore Store
+
+<PageTitle>Run @Id</PageTitle>
+
+@if (_run is null)
+{
+    <p>Run not found. <a href="/workflows">Back to workflows</a></p>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center">
+        <h1 class="mb-0">@_run.DefinitionName</h1>
+        <span class="badge fs-6 @RunBadge(_run.Status)">@_run.Status</span>
+    </div>
+    <p class="text-muted"><code>@_run.Id</code> · started @_run.CreatedAt.LocalDateTime.ToString("HH:mm:ss")</p>
+
+    <div class="border rounded bg-white p-2 mb-3" style="overflow:auto">
+        <svg width="@_width" height="@_height" style="min-width:@(_width)px">
+            @* edges *@
+            @foreach (var (from, to) in _edges)
+            {
+                var a = _pos[from]; var b = _pos[to];
+                int x1 = a.x + NodeW, y1 = a.y + NodeH / 2, x2 = b.x, y2 = b.y + NodeH / 2;
+                <path d="@($"M {x1} {y1} C {x1 + 30} {y1}, {x2 - 30} {y2}, {x2} {y2}")"
+                      fill="none" stroke="#b0b6be" stroke-width="2" />
+            }
+            @* nodes *@
+            @foreach (var n in _run.Nodes)
+            {
+                var p = _pos[n.Name];
+                var selected = n.Name == _selected;
+                <g style="cursor:pointer" @onclick="() => Select(n.Name)">
+                    <rect x="@p.x" y="@p.y" rx="6" width="@NodeW" height="@NodeH"
+                          fill="@Fill(n.Status)" stroke="@(selected ? "#0d6efd" : "#8a9099")"
+                          stroke-width="@(selected ? 3 : 1)" />
+                    <text x="@(p.x + NodeW / 2)" y="@(p.y + 21)" text-anchor="middle"
+                          font-size="13" font-weight="600" fill="#1b1f24">@n.Name</text>
+                    <text x="@(p.x + NodeW / 2)" y="@(p.y + 39)" text-anchor="middle"
+                          font-size="11" fill="#444">
+                        @n.Status@(n.IsFanOut ? $" ×{n.Tasks.Count}" : "")@(Retried(n) ? " ↻" : "")
+                    </text>
+                </g>
+            }
+        </svg>
+    </div>
+
+    @if (_selected is not null && _run.Node(_selected) is { } sel)
+    {
+        <h5>Node: @sel.Name <small class="text-muted">@sel.JobTypeName</small></h5>
+        @if (_selectedExecs.Count == 0)
+        {
+            <p class="text-muted">No executions yet (waiting on dependencies @string.Join(", ", sel.Dependencies)).</p>
+        }
+        @foreach (var e in _selectedExecs)
+        {
+            <div class="mb-3">
+                <div class="d-flex justify-content-between">
+                    <span>
+                        <span class="badge @ExecBadge(e.Status)">@e.Status</span>
+                        @if (e.Arguments.Count > 0)
+                        {
+                            <small class="text-muted ms-2">@string.Join(", ", e.Arguments.Select(a => $"{a.Key}={a.Value}"))</small>
+                        }
+                    </span>
+                    <small class="text-muted">@e.Progress% · <a href="/jobs/@e.Id">open</a></small>
+                </div>
+                <pre class="bg-dark text-light p-2 rounded mt-1" style="max-height:220px; overflow:auto">@LogText(e)</pre>
+            </div>
+        }
+    }
+    else
+    {
+        <p class="text-muted">Click a node to see its executions and logs.</p>
+    }
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = "";
+
+    private const int NodeW = 160, NodeH = 50, GapX = 70, GapY = 26, Pad = 20;
+
+    private WorkflowRun? _run;
+    private string? _selected;
+    private List<JobExecution> _selectedExecs = new();
+
+    private readonly Dictionary<string, (int x, int y)> _pos = new();
+    private readonly List<(string from, string to)> _edges = new();
+    private int _width, _height;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Store.WorkflowChanged -= OnWorkflowChanged;
+        Store.ExecutionChanged -= OnExecutionChanged;
+        await Reload();
+        Store.WorkflowChanged += OnWorkflowChanged;
+        Store.ExecutionChanged += OnExecutionChanged;
+    }
+
+    private async Task Reload()
+    {
+        _run = await Store.GetWorkflowRunAsync(Id);
+        if (_run is null) return;
+        Layout();
+        await RefreshSelected();
+    }
+
+    private void Layout()
+    {
+        _pos.Clear();
+        _edges.Clear();
+        if (_run is null) return;
+
+        // Level = longest dependency chain to this node.
+        var level = new Dictionary<string, int>();
+        int Level(string name)
+        {
+            if (level.TryGetValue(name, out var v)) return v;
+            var node = _run!.Node(name);
+            var deps = node?.Dependencies ?? Array.Empty<string>();
+            var lv = deps.Count == 0 ? 0 : deps.Select(Level).Max() + 1;
+            return level[name] = lv;
+        }
+
+        foreach (var n in _run.Nodes) Level(n.Name);
+
+        var byLevel = _run.Nodes
+            .GroupBy(n => level[n.Name])
+            .OrderBy(g => g.Key)
+            .ToList();
+
+        foreach (var col in byLevel)
+        {
+            var row = 0;
+            foreach (var n in col)
+            {
+                _pos[n.Name] = (Pad + col.Key * (NodeW + GapX), Pad + row * (NodeH + GapY));
+                row++;
+            }
+        }
+
+        foreach (var n in _run.Nodes)
+            foreach (var dep in n.Dependencies)
+                _edges.Add((dep, n.Name));
+
+        var maxLevel = byLevel.Count == 0 ? 0 : byLevel.Max(g => g.Key);
+        var maxRows = byLevel.Count == 0 ? 0 : byLevel.Max(g => g.Count());
+        _width = Pad * 2 + (maxLevel + 1) * NodeW + maxLevel * GapX;
+        _height = Pad * 2 + maxRows * NodeH + Math.Max(0, maxRows - 1) * GapY;
+    }
+
+    private void Select(string name) { _selected = name; _ = RefreshSelectedAndRender(); }
+
+    private async Task RefreshSelectedAndRender() { await RefreshSelected(); await InvokeAsync(StateHasChanged); }
+
+    private async Task RefreshSelected()
+    {
+        _selectedExecs = new();
+        if (_run is null || _selected is null) return;
+        var node = _run.Node(_selected);
+        if (node is null) return;
+        foreach (var id in node.ExecutionIds)
+        {
+            var e = await Store.GetAsync(id);
+            if (e is not null) _selectedExecs.Add(e);
+        }
+    }
+
+    private async void OnWorkflowChanged(WorkflowRun r)
+    {
+        if (r.Id != Id) return;
+        await InvokeAsync(async () => { await Reload(); StateHasChanged(); });
+    }
+
+    private async void OnExecutionChanged(JobExecution e)
+    {
+        if (e.WorkflowRunId != Id || e.NodeName != _selected) return;
+        await InvokeAsync(async () => { await RefreshSelected(); StateHasChanged(); });
+    }
+
+    private static string LogText(JobExecution e)
+    {
+        lock (e.Logs) return string.Join('\n', e.Logs);
+    }
+
+    private static bool Retried(NodeRun n) => n.Tasks.Any(t => t.Attempts.Count > 1);
+
+    private static string Fill(NodeRunStatus s) => s switch
+    {
+        NodeRunStatus.Succeeded => "#d1e7dd",
+        NodeRunStatus.Failed => "#f8d7da",
+        NodeRunStatus.Running => "#cfe2ff",
+        NodeRunStatus.Skipped => "#e2e3e5",
+        NodeRunStatus.Omitted => "#eef2f7",
+        _ => "#fff3cd"
+    };
+
+    private static string RunBadge(WorkflowRunStatus s) => s switch
+    {
+        WorkflowRunStatus.Succeeded => "text-bg-success",
+        WorkflowRunStatus.Failed => "text-bg-danger",
+        _ => "text-bg-primary"
+    };
+
+    private static string ExecBadge(JobStatus s) => s switch
+    {
+        JobStatus.Succeeded => "text-bg-success",
+        JobStatus.Failed => "text-bg-danger",
+        JobStatus.Running => "text-bg-primary",
+        JobStatus.Stopped => "text-bg-secondary",
+        _ => "text-bg-light text-dark"
+    };
+
+    public void Dispose()
+    {
+        Store.WorkflowChanged -= OnWorkflowChanged;
+        Store.ExecutionChanged -= OnExecutionChanged;
+    }
+}

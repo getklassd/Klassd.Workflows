@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
