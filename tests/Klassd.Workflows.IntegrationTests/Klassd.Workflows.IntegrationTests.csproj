@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+    <PackageReference Include="Testcontainers" />
+    <PackageReference Include="Testcontainers.K3s" />
+    <PackageReference Include="Testcontainers.Minio" />
+    <PackageReference Include="Docker.DotNet.Enhanced" />
+    <PackageReference Include="AWSSDK.S3" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Core\Klassd.Workflows.Core.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Kubernetes\Klassd.Workflows.Kubernetes.csproj" />
+    <!-- For typeof(HelloWorldJob).FullName — the job itself runs inside the worker image. -->
+    <ProjectReference Include="..\..\samples\Klassd.Workflows.SampleJobs\Klassd.Workflows.SampleJobs.csproj" />
+  </ItemGroup>
+</Project>
