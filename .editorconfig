@@ -1,0 +1,7 @@
+# Klassd.Workflows — editor/inspection settings (honored by Rider/ReSharper).
+
+[*.razor]
+# Blazor route hrefs (href="/runs") and RCL asset paths (_content/<pkg>/…) resolve at
+# runtime, not as physical files under wwwroot — ReSharper's static path check is a
+# false positive for them here.
+resharper_html_path_error_highlighting = none

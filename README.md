@@ -24,6 +24,7 @@ dotnet add package Klassd.Workflows.Core --prerelease
 dotnet add package Klassd.Workflows.Storage.Postgres --prerelease   # durable store (or .Storage.MongoDb)
 dotnet add package Klassd.Workflows.Kubernetes --prerelease         # K8s executor (omit for local only)
 dotnet add package Klassd.Workflows.Artifacts.S3 --prerelease       # artifact store (or .Artifacts.Gcs)
+dotnet add package Klassd.Workflows.Dashboard --prerelease          # the live UI (Razor Class Library)
 ```
 
 | Package | NuGet |
@@ -33,10 +34,88 @@ dotnet add package Klassd.Workflows.Artifacts.S3 --prerelease       # artifact s
 | `Klassd.Workflows.Kubernetes` | `KubernetesJobExecutor` — one `batch/v1` Job per execution. |
 | `Klassd.Workflows.Storage.Postgres` / `.Storage.MongoDb` | Durable `IJobStore` adapters. |
 | `Klassd.Workflows.Artifacts.S3` / `.Artifacts.Gcs` | `IArtifactStore` adapters (large payloads). |
+| `Klassd.Workflows.Dashboard` | The Blazor (Interactive Server) UI as a Razor Class Library — mount it into your host. |
 
 The core carries **no** Kubernetes/AWS/Google/Mongo/Npgsql dependency — each adapter keeps its SDK
-isolated, so you only pull in what you wire up. The `Dashboard` and `Worker` projects in this repo
-are reference hosts (not shipped as packages): copy them, or build the worker into your own image.
+isolated, so you only pull in what you wire up. The `Worker` project is a reference host (not a
+package): build it into your own image with your job assemblies (see *Run on Kubernetes*). The
+**`Dashboard` ships as a package** (RCL) — mount it into any ASP.NET Core host:
+
+```csharp
+builder.Services.AddHttpContextAccessor();          // the dashboard reads a theme cookie during SSR
+builder.Services.AddKlassdWorkflowsCore();           // scheduler + store
+builder.Services.AddLocalExecutor(workerDllPath);    // or AddKubernetesExecutor(...)
+builder.Services.AddKlassdWorkflowsDashboard();      // the UI
+
+var app = builder.Build();
+app.UseAntiforgery();
+app.MapKlassdWorkflowsDashboard();                   // static assets + Razor component endpoints
+app.Run();
+```
+
+The host needs `<RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>` in its csproj if it has no
+`.razor` of its own (otherwise `_framework/blazor.web.js` 404s). `samples/Klassd.Workflows.DashboardHost`
+is a complete, runnable example.
+
+## Quickstart
+
+A working jobs service with the live dashboard in four steps. (For dev you can stop after step 3 —
+the local executor needs no cluster.)
+
+**1. Define a job** — a plain class implementing `IJob`. Declare manual-start inputs with
+`[JobInput]` and pod resources with `[JobResources]` (both optional):
+
+```csharp
+using Klassd.Workflows.Abstractions;
+
+[JobInput("name", Default = "world")]
+public sealed class HelloJob : IJob
+{
+    public async Task RunAsync(IJobContext ctx)
+    {
+        var who = ctx.Arguments.GetValueOrDefault("name", "world");
+        for (var i = 1; i <= ctx.WithProgress(5); i++)   // inline progress bar in the console
+        {
+            ctx.Log($"hello {who} {i}/5");
+            await Task.Delay(1000, ctx.CancellationToken);
+        }
+    }
+}
+```
+
+**2. Host: wire the scheduler, an executor, and the dashboard** (`Program.cs`):
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddHttpContextAccessor();            // dashboard reads a theme cookie during SSR
+var workflows = builder.Services.AddKlassdWorkflowsCore();
+workflows.UsePostgres(builder.Configuration.GetConnectionString("Jobs")!);   // or .UseMongo(...) / in-memory
+
+builder.Services.AddLocalExecutor(workerDllPath);     // dev: child process per job
+// builder.Services.AddKubernetesExecutor(builder.Configuration.GetSection("Klassd.Workflows")); // prod
+builder.Services.AddKlassdWorkflowsDashboard();
+
+var app = builder.Build();
+app.UseAntiforgery();
+app.MapKlassdWorkflowsDashboard();
+
+// schedule + enqueue from anywhere
+var scheduler = app.Services.GetRequiredService<IJobScheduler>();
+scheduler.AddOrUpdateRecurring<HelloJob>("nightly", "0 2 * * *");
+await scheduler.EnqueueAsync<HelloJob>(new() { ["name"] = "team" });
+
+app.Run();
+```
+
+Add `<RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>` to the host csproj (it has no `.razor`
+of its own). Open the host URL → **Home / Jobs / Runs**.
+
+**3. Run locally** — `dotnet run` your host. Jobs run as child processes; no cluster needed.
+
+**4. Go to Kubernetes** — build a worker image containing your jobs assembly and switch the executor
+to `AddKubernetesExecutor(...)` with `WorkerImage` pointing at it (see *Run on Kubernetes*). Same job
+code, now one pod per execution.
 
 ## Projects
 
@@ -254,7 +333,10 @@ its load path — so the choice is per-deployment, not compiled in:
 ```
 
 Built-in providers: `file` (Core), `gcs`, `s3`. Credentials come from the
-platform's default chain (workload identity / IRSA / env).
+platform's default chain (workload identity / IRSA / env), or pass `accessKey` +
+`secretKey` explicitly in `ArtifactSettings`. For S3-compatible stores set
+`serviceUrl` (e.g. MinIO/Ceph); the `s3` provider then requests checksums only
+`WHEN_REQUIRED`, since SDK v4's default checksums break many such stores.
 
 ## Extending with your own adapters
 
@@ -269,12 +351,13 @@ platform's default chain (workload identity / IRSA / env).
 
 ```bash
 dotnet build
-dotnet run --project src/Klassd.Workflows.Dashboard
-# open the printed URL — Jobs + Recurring pages
+dotnet run --project samples/Klassd.Workflows.DashboardHost
+# open the printed URL — Home, Jobs catalog, Runs (status-filtered)
 ```
 
-The dashboard's local executor launches `Klassd.Workflows.Worker.dll` as a child
-process per job. (Build the solution first so the worker output exists.)
+`DashboardHost` is the reference host that mounts the `Klassd.Workflows.Dashboard` RCL and wires the
+sample jobs/workflow. Its local executor launches `Klassd.Workflows.Worker.dll` as a child process
+per job. (Build the solution first so the worker output exists.)
 
 ## Run on Kubernetes
 
