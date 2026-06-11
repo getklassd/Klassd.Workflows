@@ -1,3 +1,4 @@
+using System.Reflection;
 using Klassd.Workflows.Abstractions;
 using Klassd.Workflows.Core.Abstractions;
 
@@ -14,14 +15,20 @@ public sealed class JobCatalog : IJobCatalog
         Jobs = AppDomain.CurrentDomain.GetAssemblies()
             .SelectMany(SafeGetTypes)
             .Where(t => t is { IsClass: true, IsAbstract: false } && jobType.IsAssignableFrom(t))
-            .Select(t => new JobTypeInfo(t.FullName!, t.Name))
+            .Select(t => new JobTypeInfo(t.FullName!, t.Name, ReadInputs(t)))
             .OrderBy(j => j.DisplayName)
             .ToList();
     }
 
-    private static IEnumerable<Type> SafeGetTypes(System.Reflection.Assembly a)
+    private static IReadOnlyList<JobInputInfo> ReadInputs(Type t) =>
+        t.GetCustomAttributes<JobInputAttribute>(false)
+            .Select(a => new JobInputInfo(
+                a.Name, a.Label ?? a.Name, a.Default, a.Required, a.Type, a.Description))
+            .ToList();
+
+    private static IEnumerable<Type> SafeGetTypes(Assembly a)
     {
         try { return a.GetTypes(); }
-        catch (System.Reflection.ReflectionTypeLoadException ex) { return ex.Types.Where(t => t is not null)!; }
+        catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t is not null)!; }
     }
 }

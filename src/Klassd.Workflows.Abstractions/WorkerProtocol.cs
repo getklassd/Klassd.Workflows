@@ -10,6 +10,15 @@ public static class WorkerProtocol
 {
     public const string LogPrefix = "##LOG##";
     public const string ProgressPrefix = "##PROGRESS##"; // ##PROGRESS## <percent> <message>
+    public const string ProgressBarPrefix = "##PROGRESSBAR##"; // ##PROGRESSBAR## <barId> <current> <total>
+
+    /// <summary>
+    /// Sentinel stored in a job's log buffer to mark an inline progress bar's position.
+    /// Format: <c>##BAR## &lt;barId&gt; &lt;current&gt; &lt;total&gt;</c>. The executor updates the
+    /// entry with this id in place (rather than appending) so the bar advances where it sits in
+    /// the console; the dashboard renders these lines as a progress bar.
+    /// </summary>
+    public const string ConsoleBarMarker = "##BAR##";
     public const string StatePrefix = "##STATE##";       // ##STATE## <Succeeded|Failed> <message>
     public const string OutputPrefix = "##OUTPUT##";     // ##OUTPUT## <key> <value>
 

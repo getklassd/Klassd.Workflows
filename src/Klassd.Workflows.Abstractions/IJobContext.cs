@@ -28,6 +28,15 @@ public interface IJobContext
     void ReportProgress(int percent, string? message = null);
 
     /// <summary>
+    /// Declares a fixed-size loop and returns <paramref name="total"/> so it can be used as
+    /// the loop bound, e.g. <c>for (var i = 0; i &lt; context.WithProgress(items.Count); i++)</c>.
+    /// Each evaluation advances a single progress bar pinned in the job's console (updated in
+    /// place rather than appending a line per step), reaching <paramref name="total"/> when the
+    /// loop exits. Independent of <see cref="ReportProgress"/>, which drives the overall percent.
+    /// </summary>
+    int WithProgress(int total);
+
+    /// <summary>
     /// Publish a named output. Downstream DAG nodes can read it as an argument,
     /// and a node can fan out over an output whose value is a JSON array
     /// (mirrors Argo's <c>outputs.parameters</c> + <c>withParam</c>).

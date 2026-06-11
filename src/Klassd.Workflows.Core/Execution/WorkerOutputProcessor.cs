@@ -13,19 +13,44 @@ public static class WorkerOutputProcessor
 {
     public static async Task ProcessLineAsync(IJobStore store, JobExecution exec, string line)
     {
-        if (line is null) return;
-
         if (line.StartsWith(WorkerProtocol.ProgressPrefix, StringComparison.Ordinal))
         {
             var rest = line[WorkerProtocol.ProgressPrefix.Length..].Trim();
             var space = rest.IndexOf(' ');
             var numText = space < 0 ? rest : rest[..space];
-            if (int.TryParse(numText, out var pct))
+            if (!int.TryParse(numText, out var pct)) return;
+            exec.Progress = Math.Clamp(pct, 0, 100);
+            exec.ProgressMessage = space < 0 ? null : rest[(space + 1)..];
+            await store.UpdateAsync(exec);
+            return;
+        }
+
+        if (line.StartsWith(WorkerProtocol.ProgressBarPrefix, StringComparison.Ordinal))
+        {
+            var parts = line[WorkerProtocol.ProgressBarPrefix.Length..]
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length != 3
+                || !int.TryParse(parts[0], out var barId)
+                || !int.TryParse(parts[1], out var current)
+                || !int.TryParse(parts[2], out var total) || total <= 0) return;
+            // First bar output flips us into Running, like any other line.
+            if (exec.Status is JobStatus.Starting or JobStatus.Enqueued)
             {
-                exec.Progress = Math.Clamp(pct, 0, 100);
-                exec.ProgressMessage = space < 0 ? null : rest[(space + 1)..];
-                await store.UpdateAsync(exec);
+                exec.Status = JobStatus.Running;
+                exec.StartedAt ??= DateTimeOffset.UtcNow;
             }
+
+            var marker = $"{WorkerProtocol.ConsoleBarMarker} {barId} {Math.Clamp(current, 0, total)} {total}";
+            var idPrefix = $"{WorkerProtocol.ConsoleBarMarker} {barId} ";
+            lock (exec.Logs)
+            {
+                var idx = -1;
+                for (var k = 0; k < exec.Logs.Count; k++)
+                    if (exec.Logs[k].StartsWith(idPrefix, StringComparison.Ordinal)) { idx = k; break; }
+                if (idx >= 0) exec.Logs[idx] = marker; // advance in place
+                else exec.Logs.Add(marker);            // first tick fixes the bar's position
+            }
+            await store.UpdateAsync(exec);
             return;
         }
 
@@ -33,13 +58,11 @@ public static class WorkerOutputProcessor
         {
             var rest = line[WorkerProtocol.OutputPrefix.Length..].Trim();
             var space = rest.IndexOf(' ');
-            if (space > 0)
-            {
-                var key = rest[..space];
-                var value = rest[(space + 1)..];
-                exec.Outputs[key] = value;
-                await store.UpdateAsync(exec);
-            }
+            if (space <= 0) return;
+            var key = rest[..space];
+            var value = rest[(space + 1)..];
+            exec.Outputs[key] = value;
+            await store.UpdateAsync(exec);
             return;
         }
 
