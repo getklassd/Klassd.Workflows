@@ -1,17 +1,30 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Klassd.Workflows.Dashboard</PackageId>
+    <Description>Live Blazor (Interactive Server) dashboard for Klassd.Workflows — jobs catalog, run history with status filters, per-job console with inline progress bars, and workflow DAG views — packaged as a Razor Class Library. Mount it into an ASP.NET Core host with AddKlassdWorkflowsDashboard()/MapKlassdWorkflowsDashboard().</Description>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!--
+    NOTE: a consuming host whose only Blazor components come from this RCL (no .razor of its own)
+    must set <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets> in its OWN csproj, or it 404s
+    on _framework/blazor.web.js. It can't be shipped from here (the property gates a restore-time
+    framework download and package build props aren't imported during restore). Document it instead.
+  -->
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
     <ProjectReference Include="..\Klassd.Workflows.Core\Klassd.Workflows.Core.csproj" />
-    <ProjectReference Include="..\Klassd.Workflows.Kubernetes\Klassd.Workflows.Kubernetes.csproj" />
-    <ProjectReference Include="..\..\samples\Klassd.Workflows.SampleJobs\Klassd.Workflows.SampleJobs.csproj" />
-    <ProjectReference Include="..\Klassd.Workflows.Storage.Postgres\Klassd.Workflows.Storage.Postgres.csproj" />
-    <ProjectReference Include="..\Klassd.Workflows.Storage.MongoDb\Klassd.Workflows.Storage.MongoDb.csproj" />
   </ItemGroup>
-
-  <PropertyGroup>
-    <!-- Reference host app (demo dashboard); not shipped as a package. -->
-    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
-  </PropertyGroup>
 
 </Project>

@@ -1,19 +1,22 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
-
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+<div class="admin-shell">
+    <header class="admin-topbar navbar">
+        <div class="admin-brand">Klass<span>d</span> · Workflows</div>
+        <div class="grow"></div>
+        <div class="actions admin-topbar-actions">
+            <ThemeToggle />
         </div>
+    </header>
 
-        <article class="content px-4">
+    <div class="wf-body">
+        <aside class="wf-rail">
+            <NavMenu />
+        </aside>
+        <main class="admin-content">
             @Body
-        </article>
-    </main>
+        </main>
+    </div>
 </div>
 
 <div id="blazor-error-ui" data-nosnippet>

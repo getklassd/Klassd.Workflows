@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/samples/">
+    <Project Path="samples/Klassd.Workflows.DashboardHost/Klassd.Workflows.DashboardHost.csproj" />
     <Project Path="samples/Klassd.Workflows.SampleJobs/Klassd.Workflows.SampleJobs.csproj" />
   </Folder>
   <Folder Name="/src/">
@@ -12,5 +13,8 @@
     <Project Path="src/Klassd.Workflows.Storage.MongoDb/Klassd.Workflows.Storage.MongoDb.csproj" />
     <Project Path="src/Klassd.Workflows.Storage.Postgres/Klassd.Workflows.Storage.Postgres.csproj" />
     <Project Path="src/Klassd.Workflows.Worker/Klassd.Workflows.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Klassd.Workflows.IntegrationTests/Klassd.Workflows.IntegrationTests.csproj" />
   </Folder>
 </Solution>

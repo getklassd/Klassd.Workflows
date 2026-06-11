@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <!-- Reference host that mounts the Klassd.Workflows.Dashboard RCL; not shipped as a package. -->
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+    <!-- All Blazor components come from the RCL (this host has no .razor of its own), so opt the
+         host into the Blazor web assets or it 404s on _framework/blazor.web.js. -->
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Dashboard\Klassd.Workflows.Dashboard.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Kubernetes\Klassd.Workflows.Kubernetes.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Storage.Postgres\Klassd.Workflows.Storage.Postgres.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Storage.MongoDb\Klassd.Workflows.Storage.MongoDb.csproj" />
+    <ProjectReference Include="..\Klassd.Workflows.SampleJobs\Klassd.Workflows.SampleJobs.csproj" />
+    <!-- Build the worker so the local executor has a dll to launch (not linked into the host). -->
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Worker\Klassd.Workflows.Worker.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

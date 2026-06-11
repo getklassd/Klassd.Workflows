@@ -1,0 +1,208 @@
+@page "/jobs"
+@rendermode InteractiveServer
+@inject IJobCatalog Catalog
+@inject IWorkflowRegistry Registry
+@inject IJobStore Store
+@inject IJobScheduler Scheduler
+@inject NavigationManager Nav
+
+<PageTitle>Jobs</PageTitle>
+
+<h1 style="margin-bottom:4px;">Jobs</h1>
+<p class="muted" style="margin-bottom:18px;">Everything that can run — jobs and workflows. Start any of
+   them manually, or let the ones with a schedule fire on their cron.</p>
+
+<div class="card">
+    <div class="card-body" style="padding:0;">
+        <table class="table">
+            <thead>
+                <tr><th>Name</th><th>Type</th><th>Schedule</th><th>Last run</th><th style="text-align:right"></th></tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _runnables)
+                {
+                    var rec = Recurring(r);
+                    <tr class="hover">
+                        <td>
+                            <strong>@r.DisplayName</strong>
+                            @if (r.Inputs.Count > 0)
+                            {
+                                <span class="badge badge-ghost badge-sm" style="margin-left:8px;">@r.Inputs.Count input@(r.Inputs.Count == 1 ? "" : "s")</span>
+                            }
+                        </td>
+                        <td><span class="badge @(r.Kind == RunKind.Workflow ? "badge-info" : "badge-ghost")">@r.Kind</span></td>
+                        <td>
+                            @if (rec is not null)
+                            {
+                                <code>@rec.Cron</code>
+                                @if (!rec.Enabled) { <span class="badge badge-warning badge-sm" style="margin-left:4px;">disabled</span> }
+                            }
+                            else { <span class="muted">Manual</span> }
+                        </td>
+                        <td>
+                            @if (rec?.LastRun is { } lr)
+                            {
+                                @if (rec.LastExecutionId is not null)
+                                {
+                                    <a href="@LastLink(rec)">@lr.LocalDateTime.ToString("HH:mm:ss")</a>
+                                }
+                                else { <span>@lr.LocalDateTime.ToString("HH:mm:ss")</span> }
+                            }
+                            else { <span class="muted">—</span> }
+                        </td>
+                        <td style="text-align:right">
+                            <button class="btn btn-primary btn-sm" @onclick="() => Launch(r)">Run</button>
+                        </td>
+                    </tr>
+                }
+                @if (_runnables.Count == 0)
+                {
+                    <tr><td colspan="5" class="empty-state">Nothing registered.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@if (_launching is { } job)
+{
+    <div class="modal modal-open">
+        <div class="modal-box">
+            <h2 style="margin-bottom:16px;">Run @job.DisplayName</h2>
+            @foreach (var input in job.Inputs)
+            {
+                <div class="form-group">
+                    <label>
+                        @input.Label
+                        @if (input.Required) { <span class="text-error">*</span> }
+                    </label>
+                    @if (input.Type == JobInputType.Boolean)
+                    {
+                        <label class="checkbox-row">
+                            <input class="checkbox" type="checkbox"
+                                   checked="@(_values[input.Name] == "true")"
+                                   @onchange="e => SetBool(input.Name, e)" />
+                            <span class="text-sm muted">@input.Description</span>
+                        </label>
+                    }
+                    else
+                    {
+                        <input class="input" style="width:100%"
+                               type="@(input.Type == JobInputType.Number ? "number" : "text")"
+                               @bind="_values[input.Name]" @bind:event="oninput" />
+                        @if (input.Description is not null)
+                        {
+                            <div class="text-sm muted" style="margin-top:4px;">@input.Description</div>
+                        }
+                    }
+                </div>
+            }
+            @if (_error is not null)
+            {
+                <div class="text-error text-sm">@_error</div>
+            }
+            <div class="modal-action">
+                <button class="btn btn-ghost" @onclick="Cancel">Cancel</button>
+                <button class="btn btn-primary" @onclick="Confirm">Start</button>
+            </div>
+        </div>
+        <div class="modal-backdrop" @onclick="Cancel"></div>
+    </div>
+}
+
+@code {
+    private enum RunKind { Job, Workflow }
+    private sealed record Runnable(RunKind Kind, string Key, string DisplayName, IReadOnlyList<JobInputInfo> Inputs);
+
+    private IReadOnlyList<Runnable> _runnables = [];
+    private IReadOnlyList<RecurringJob> _recurring = [];
+
+    private Runnable? _launching;
+    private Dictionary<string, string> _values = new();
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Job types used as workflow nodes aren't independently runnable — hide them;
+        // the workflow that owns them is listed instead.
+        var nodeTypes = Registry.All
+            .SelectMany(w => w.Nodes)
+            .Select(n => n.JobTypeName)
+            .ToHashSet();
+
+        var jobs = Catalog.Jobs
+            .Where(j => !nodeTypes.Contains(j.TypeName))
+            .Select(j => new Runnable(RunKind.Job, j.TypeName, j.DisplayName, j.Inputs));
+        var workflows = Registry.All
+            .Select(w => new Runnable(RunKind.Workflow, w.Name, w.Name, []));
+
+        _runnables = jobs.Concat(workflows).OrderBy(r => r.DisplayName).ToList();
+        await RefreshRecurringAsync();
+    }
+
+    private async Task RefreshRecurringAsync() => _recurring = await Store.ListRecurringAsync();
+
+    private RecurringJob? Recurring(Runnable r) => _recurring.FirstOrDefault(rec =>
+        r.Kind == RunKind.Workflow
+            ? rec.Kind == RecurringKind.Workflow && rec.WorkflowName == r.Key
+            : rec.Kind == RecurringKind.Job && rec.JobTypeName == r.Key);
+
+    private void Launch(Runnable r)
+    {
+        _error = null;
+        if (r is { Kind: RunKind.Job, Inputs.Count: > 0 })
+        {
+            _values = r.Inputs.ToDictionary(i => i.Name, i => i.Default ?? "");
+            _launching = r;
+            return;
+        }
+        _ = StartAsync(r, new());
+    }
+
+    private void SetBool(string name, ChangeEventArgs e) =>
+        _values[name] = e.Value is true ? "true" : "false";
+
+    private void Cancel() { _launching = null; _error = null; }
+
+    private async Task Confirm()
+    {
+        if (_launching is not { } job) return;
+
+        var missing = job.Inputs.FirstOrDefault(i =>
+            i.Required && string.IsNullOrWhiteSpace(_values.GetValueOrDefault(i.Name)));
+        if (missing is not null)
+        {
+            _error = $"{missing.Label} is required.";
+            return;
+        }
+
+        var args = _values
+            .Where(kv => !string.IsNullOrEmpty(kv.Value))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
+
+        _launching = null;
+        await StartAsync(job, args);
+    }
+
+    private async Task StartAsync(Runnable r, Dictionary<string, string> args)
+    {
+        string execId;
+        if (r.Kind == RunKind.Workflow)
+            execId = await Scheduler.EnqueueWorkflowAsync(r.Key);
+        else
+            execId = await Scheduler.EnqueueAsync(r.Key, args);
+
+        // Keep the schedule's "last run" honest when a scheduled item is fired by hand.
+        if (Recurring(r) is { } rec)
+        {
+            rec.LastRun = DateTimeOffset.UtcNow;
+            rec.LastExecutionId = execId;
+            await Store.UpsertRecurringAsync(rec);
+        }
+
+        Nav.NavigateTo(r.Kind == RunKind.Workflow ? $"/workflows/runs/{execId}" : $"/jobs/{execId}");
+    }
+
+    private static string LastLink(RecurringJob r) =>
+        r.Kind == RecurringKind.Workflow ? $"/workflows/runs/{r.LastExecutionId}" : $"/jobs/{r.LastExecutionId}";
+}

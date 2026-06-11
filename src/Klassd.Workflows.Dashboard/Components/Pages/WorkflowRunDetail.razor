@@ -7,17 +7,17 @@
 
 @if (_run is null)
 {
-    <p>Run not found. <a href="/workflows">Back to workflows</a></p>
+    <p>Run not found. <a href="/runs">Back to runs</a></p>
 }
 else
 {
-    <div class="d-flex justify-content-between align-items-center">
-        <h1 class="mb-0">@_run.DefinitionName</h1>
-        <span class="badge fs-6 @RunBadge(_run.Status)">@_run.Status</span>
+    <div class="spread">
+        <h1>@_run.DefinitionName</h1>
+        <span class="badge badge-lg @RunBadge(_run.Status)">@_run.Status</span>
     </div>
-    <p class="text-muted"><code>@_run.Id</code> · started @_run.CreatedAt.LocalDateTime.ToString("HH:mm:ss")</p>
+    <p class="muted text-sm"><code>@_run.Id</code> · started @_run.CreatedAt.LocalDateTime.ToString("HH:mm:ss")</p>
 
-    <div class="border rounded bg-white p-2 mb-3" style="overflow:auto">
+    <div class="card" style="overflow:auto; margin-bottom:16px; padding:8px;">
         <svg width="@_width" height="@_height" style="min-width:@(_width)px">
             @* edges *@
             @foreach (var (from, to) in _edges)
@@ -49,31 +49,31 @@ else
 
     @if (_selected is not null && _run.Node(_selected) is { } sel)
     {
-        <h5>Node: @sel.Name <small class="text-muted">@sel.JobTypeName</small></h5>
+        <h2>Node: @sel.Name <span class="text-sm muted">@sel.JobTypeName</span></h2>
         @if (_selectedExecs.Count == 0)
         {
-            <p class="text-muted">No executions yet (waiting on dependencies @string.Join(", ", sel.Dependencies)).</p>
+            <p class="muted">No executions yet (waiting on dependencies @string.Join(", ", sel.Dependencies)).</p>
         }
         @foreach (var e in _selectedExecs)
         {
-            <div class="mb-3">
-                <div class="d-flex justify-content-between">
+            <div style="margin-bottom:16px;">
+                <div class="spread">
                     <span>
                         <span class="badge @ExecBadge(e.Status)">@e.Status</span>
                         @if (e.Arguments.Count > 0)
                         {
-                            <small class="text-muted ms-2">@string.Join(", ", e.Arguments.Select(a => $"{a.Key}={a.Value}"))</small>
+                            <span class="text-sm muted" style="margin-left:8px;">@string.Join(", ", e.Arguments.Select(a => $"{a.Key}={a.Value}"))</span>
                         }
                     </span>
-                    <small class="text-muted">@e.Progress% · <a href="/jobs/@e.Id">open</a></small>
+                    <span class="text-sm muted">@e.Progress% · <a href="/jobs/@e.Id">open</a></span>
                 </div>
-                <pre class="bg-dark text-light p-2 rounded mt-1" style="max-height:220px; overflow:auto">@LogText(e)</pre>
+                <ConsoleView Lines="Snapshot(e)" Style="max-height:220px; margin-top:6px;" />
             </div>
         }
     }
     else
     {
-        <p class="text-muted">Click a node to see its executions and logs.</p>
+        <p class="muted">Click a node to see its executions and logs.</p>
     }
 }
 
@@ -84,10 +84,10 @@ else
 
     private WorkflowRun? _run;
     private string? _selected;
-    private List<JobExecution> _selectedExecs = new();
+    private List<JobExecution> _selectedExecs = [];
 
     private readonly Dictionary<string, (int x, int y)> _pos = new();
-    private readonly List<(string from, string to)> _edges = new();
+    private readonly List<(string from, string to)> _edges = [];
     private int _width, _height;
 
     protected override async Task OnParametersSetAsync()
@@ -119,7 +119,7 @@ else
         {
             if (level.TryGetValue(name, out var v)) return v;
             var node = _run!.Node(name);
-            var deps = node?.Dependencies ?? Array.Empty<string>();
+            var deps = node?.Dependencies ?? [];
             var lv = deps.Count == 0 ? 0 : deps.Select(Level).Max() + 1;
             return level[name] = lv;
         }
@@ -157,7 +157,7 @@ else
 
     private async Task RefreshSelected()
     {
-        _selectedExecs = new();
+        _selectedExecs = [];
         if (_run is null || _selected is null) return;
         var node = _run.Node(_selected);
         if (node is null) return;
@@ -168,21 +168,21 @@ else
         }
     }
 
-    private async void OnWorkflowChanged(WorkflowRun r)
+    private void OnWorkflowChanged(WorkflowRun r)
     {
         if (r.Id != Id) return;
-        await InvokeAsync(async () => { await Reload(); StateHasChanged(); });
+        _ = InvokeAsync(async () => { await Reload(); StateHasChanged(); });
     }
 
-    private async void OnExecutionChanged(JobExecution e)
+    private void OnExecutionChanged(JobExecution e)
     {
         if (e.WorkflowRunId != Id || e.NodeName != _selected) return;
-        await InvokeAsync(async () => { await RefreshSelected(); StateHasChanged(); });
+        _ = InvokeAsync(async () => { await RefreshSelected(); StateHasChanged(); });
     }
 
-    private static string LogText(JobExecution e)
+    private static IReadOnlyList<string> Snapshot(JobExecution e)
     {
-        lock (e.Logs) return string.Join('\n', e.Logs);
+        lock (e.Logs) return e.Logs.ToList();
     }
 
     private static bool Retried(NodeRun n) => n.Tasks.Any(t => t.Attempts.Count > 1);
@@ -199,18 +199,17 @@ else
 
     private static string RunBadge(WorkflowRunStatus s) => s switch
     {
-        WorkflowRunStatus.Succeeded => "text-bg-success",
-        WorkflowRunStatus.Failed => "text-bg-danger",
-        _ => "text-bg-primary"
+        WorkflowRunStatus.Succeeded => "badge-success",
+        WorkflowRunStatus.Failed => "badge-error",
+        _ => "badge-primary"
     };
 
     private static string ExecBadge(JobStatus s) => s switch
     {
-        JobStatus.Succeeded => "text-bg-success",
-        JobStatus.Failed => "text-bg-danger",
-        JobStatus.Running => "text-bg-primary",
-        JobStatus.Stopped => "text-bg-secondary",
-        _ => "text-bg-light text-dark"
+        JobStatus.Succeeded => "badge-success",
+        JobStatus.Failed => "badge-error",
+        JobStatus.Running => "badge-primary",
+        _ => "badge-ghost"
     };
 
     public void Dispose()

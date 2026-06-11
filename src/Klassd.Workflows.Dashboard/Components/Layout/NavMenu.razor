@@ -1,27 +1,21 @@
-<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">Klassd.Workflows</a>
-    </div>
-</div>
-
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
-
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Jobs
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="recurring">
-                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Recurring
-            </NavLink>
-        </div>
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="workflows">
-                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Workflows
-            </NavLink>
-        </div>
-    </nav>
-</div>
+@* Left-rail nav, daisyUI .menu styled by klassd tokens (matches the Klassd admin look). *@
+<ul class="menu">
+    <li>
+        <NavLink href="" Match="NavLinkMatch.All" ActiveClass="menu-active">🏠 Home</NavLink>
+    </li>
+    <li>
+        <NavLink href="jobs" ActiveClass="menu-active">📋 Jobs</NavLink>
+    </li>
+    <li>
+        <details open>
+            <summary>Runs</summary>
+            <ul>
+                <li><NavLink href="runs" Match="NavLinkMatch.All" ActiveClass="menu-active">All</NavLink></li>
+                <li><NavLink href="runs/pending" ActiveClass="menu-active">Pending</NavLink></li>
+                <li><NavLink href="runs/running" ActiveClass="menu-active">Running</NavLink></li>
+                <li><NavLink href="runs/success" ActiveClass="menu-active">Success</NavLink></li>
+                <li><NavLink href="runs/failed" ActiveClass="menu-active">Failed</NavLink></li>
+            </ul>
+        </details>
+    </li>
+</ul>

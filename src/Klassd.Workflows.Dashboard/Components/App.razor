@@ -1,16 +1,45 @@
+@inject IHttpContextAccessor Http
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="@ServerTheme">
 
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    @* Theme. The server renders data-theme from the klassd-theme cookie so it's correct on
+       first paint and on every (enhanced) navigation. This script only handles the first-ever
+       visit (no cookie yet): pick OS preference, then persist to cookie + localStorage so the
+       next server render is authoritative. Re-runs on enhanced navigation as a belt-and-braces. *@
+    <script>
+        (function () {
+            function readCookie() {
+                var m = document.cookie.match(/(?:^|;\s*)klassd-theme=(light|dark)/);
+                return m ? m[1] : null;
+            }
+            function applyTheme() {
+                var el = document.documentElement;
+                var t = readCookie();
+                if (t !== 'light' && t !== 'dark') {
+                    try { t = localStorage.getItem('klassd-theme'); } catch (e) { t = null; }
+                }
+                if (t !== 'light' && t !== 'dark') {
+                    t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                }
+                el.setAttribute('data-theme', t);
+                try { localStorage.setItem('klassd-theme', t); } catch (e) {}
+                document.cookie = 'klassd-theme=' + t + ';path=/;max-age=31536000;samesite=lax';
+            }
+            applyTheme();
+            document.addEventListener('enhancedload', applyTheme);
+            window.addEventListener('pageshow', applyTheme);
+        })();
+    </script>
     <ResourcePreloader />
-    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
-    <link rel="stylesheet" href="@Assets["app.css"]" />
-    <link rel="stylesheet" href="@Assets["Klassd.Workflows.Dashboard.styles.css"]" />
+    <link rel="stylesheet" href="_content/Klassd.Workflows.Dashboard/daisyui.css" />
+    <link rel="stylesheet" href="_content/Klassd.Workflows.Dashboard/klassd.css" />
+    <link rel="stylesheet" href="_content/Klassd.Workflows.Dashboard/app.css" />
     <ImportMap />
-    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="icon" type="image/png" href="_content/Klassd.Workflows.Dashboard/favicon.png" />
     <HeadOutlet />
 </head>
 
@@ -21,3 +50,9 @@
 </body>
 
 </html>
+
+@code {
+    // Theme from the cookie, rendered on <html> so every server response carries it.
+    private string ServerTheme =>
+        Http.HttpContext?.Request.Cookies["klassd-theme"] is "dark" ? "dark" : "light";
+}

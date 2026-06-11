@@ -1,0 +1,47 @@
+@* Job console: log lines plus inline progress bars. A bar is a single entry in the log
+   buffer (##BAR## <id> <current> <total>), updated in place by the executor, so it advances
+   where it sits in the stream. Multiple loops → multiple bars. *@
+<div class="wf-console" style="@Style">
+    @foreach (var e in Parse())
+    {
+        @if (e.IsBar)
+        {
+            var pct = e.Total > 0 ? (int)Math.Round(100.0 * e.Current / e.Total) : 0;
+            <div class="wf-bar">
+                <progress class="progress progress-accent" value="@e.Current" max="@e.Total"></progress>
+                <span class="wf-bar-text">@e.Current/@e.Total · @pct%</span>
+            </div>
+        }
+        else
+        {
+            <div class="wf-line">@e.Text</div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<string>? Lines { get; set; }
+    [Parameter] public string? Style { get; set; }
+
+    private readonly record struct Entry(bool IsBar, string? Text, int Current, int Total);
+
+    private IEnumerable<Entry> Parse()
+    {
+        if (Lines is null) yield break;
+        var marker = WorkerProtocol.ConsoleBarMarker + " ";
+        foreach (var line in Lines)
+        {
+            if (line.StartsWith(marker, StringComparison.Ordinal))
+            {
+                var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                // ##BAR## <id> <current> <total>
+                if (parts.Length == 4 && int.TryParse(parts[2], out var cur) && int.TryParse(parts[3], out var total))
+                {
+                    yield return new Entry(true, null, cur, total);
+                    continue;
+                }
+            }
+            yield return new Entry(false, line, 0, 0);
+        }
+    }
+}

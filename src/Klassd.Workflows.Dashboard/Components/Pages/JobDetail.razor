@@ -8,47 +8,46 @@
 
 @if (_exec is null)
 {
-    <p>Job not found. <a href="/">Back to jobs</a></p>
+    <p>Job not found. <a href="/runs">Back to runs</a></p>
 }
 else
 {
-    <div class="d-flex justify-content-between align-items-start">
+    <div class="spread" style="align-items:flex-start;">
         <div>
             <h1>@_exec.JobName</h1>
-            <p class="text-muted mb-1">@_exec.JobTypeName</p>
-            <p class="mb-1"><code>@_exec.Id</code> · executor: <strong>@_exec.ExecutorName</strong>
+            <p class="muted text-sm" style="margin:2px 0;">@_exec.JobTypeName</p>
+            <p class="text-sm" style="margin:2px 0;"><code>@_exec.Id</code> · executor: <strong>@_exec.ExecutorName</strong>
                 @if (_exec.ExecutorHandle is not null) { <span> · @_exec.ExecutorHandle</span> }
             </p>
         </div>
-        <div>
-            @if (!_exec.IsTerminal)
-            {
-                <button class="btn btn-outline-danger" @onclick="StopAsync">Stop job</button>
-            }
-        </div>
-    </div>
-
-    <div class="my-3">
-        <span class="badge @BadgeClass(_exec.Status) fs-6">@_exec.Status</span>
-        @if (_exec.Error is not null)
+        @if (!_exec.IsTerminal)
         {
-            <span class="text-danger ms-2">@_exec.Error</span>
+            <button class="btn btn-error btn-outline" @onclick="StopAsync">Stop job</button>
         }
     </div>
 
-    <div class="progress mb-3" role="progressbar" style="height:24px">
-        <div class="progress-bar" style="width:@(_exec.Progress)%">@_exec.Progress% @_exec.ProgressMessage</div>
+    <div style="margin:16px 0;">
+        <span class="badge badge-lg @BadgeClass(_exec.Status)">@_exec.Status</span>
+        @if (_exec.Error is not null)
+        {
+            <span class="text-error" style="margin-left:8px;">@_exec.Error</span>
+        }
     </div>
 
-    <h5>Console</h5>
-    <pre class="bg-dark text-light p-3 rounded" style="height:420px; overflow:auto">@_logs</pre>
+    <div class="spread" style="margin-bottom:16px;">
+        <progress class="progress @ProgressClass(_exec.Status)" value="@_exec.Progress" max="100" style="flex:1;"></progress>
+        <span class="text-sm muted" style="min-width:160px;text-align:right;">@_exec.Progress% @_exec.ProgressMessage</span>
+    </div>
+
+    <h2 style="margin-bottom:8px;">Console</h2>
+    <ConsoleView Lines="_lines" Style="height:420px;" />
 }
 
 @code {
     [Parameter] public string Id { get; set; } = "";
 
     private JobExecution? _exec;
-    private string _logs = "";
+    private IReadOnlyList<string> _lines = [];
 
     protected override async Task OnParametersSetAsync()
     {
@@ -61,25 +60,33 @@ else
     {
         _exec = await Store.GetAsync(Id);
         if (_exec is not null)
-            lock (_exec.Logs) _logs = string.Join('\n', _exec.Logs);
+            lock (_exec.Logs) _lines = _exec.Logs.ToList();
     }
 
-    private async void OnChanged(JobExecution e)
+    private void OnChanged(JobExecution e)
     {
         if (e.Id != Id) return;
-        await InvokeAsync(async () => { await RefreshAsync(); StateHasChanged(); });
+        _ = InvokeAsync(async () => { await RefreshAsync(); StateHasChanged(); });
     }
 
     private async Task StopAsync() => await Scheduler.StopAsync(Id);
 
     private static string BadgeClass(JobStatus s) => s switch
     {
-        JobStatus.Succeeded => "text-bg-success",
-        JobStatus.Failed => "text-bg-danger",
-        JobStatus.Running => "text-bg-primary",
-        JobStatus.Stopped => "text-bg-secondary",
-        JobStatus.Starting => "text-bg-info",
-        _ => "text-bg-light text-dark"
+        JobStatus.Succeeded => "badge-success",
+        JobStatus.Failed => "badge-error",
+        JobStatus.Running => "badge-primary",
+        JobStatus.Stopped => "badge-ghost",
+        JobStatus.Starting => "badge-info",
+        _ => "badge-ghost",
+    };
+
+    private static string ProgressClass(JobStatus s) => s switch
+    {
+        JobStatus.Succeeded => "progress-success",
+        JobStatus.Failed or JobStatus.Stopped => "progress-error",
+        JobStatus.Running => "progress-primary",
+        _ => "",
     };
 
     public void Dispose() => Store.ExecutionChanged -= OnChanged;

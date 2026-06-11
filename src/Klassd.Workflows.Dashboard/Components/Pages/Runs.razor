@@ -1,34 +1,22 @@
-@page "/"
+@page "/runs"
+@page "/runs/{Status}"
 @rendermode InteractiveServer
 @implements IDisposable
 @inject IJobStore Store
+@inject IJobScheduler Scheduler
 
-<PageTitle>Dashboard</PageTitle>
+<PageTitle>@Title</PageTitle>
 
-<h1 style="margin-bottom:16px;">Dashboard</h1>
+<h1 style="margin-bottom:16px;">@Title</h1>
 
-<div class="stats" style="width:100%; box-shadow:0 1px 3px rgba(0,0,0,.12); margin-bottom:24px;">
-    @foreach (var s in Stats)
-    {
-        <a class="stat" href="@StatLink(s.State)">
-            <div class="stat-title">@s.State</div>
-            <div class="stat-value @ValueClass(s.State)">@s.Count</div>
-        </a>
-    }
-</div>
-
-<div class="spread" style="margin-bottom:8px;">
-    <h2>Latest runs</h2>
-    <a href="/runs">View all</a>
-</div>
 <div class="card">
     <div class="card-body" style="padding:0;">
         <table class="table">
             <thead>
-                <tr><th>Job</th><th>Status</th><th>Progress</th><th>Executor</th><th>Created</th></tr>
+                <tr><th>Job</th><th>Status</th><th>Progress</th><th>Executor</th><th>Created</th><th></th></tr>
             </thead>
             <tbody>
-                @foreach (var r in _latest)
+                @foreach (var r in _filtered)
                 {
                     <tr class="hover">
                         <td><a href="@r.Href">@r.Name</a><br /><span class="slug-cell">@r.Id</span></td>
@@ -40,11 +28,17 @@
                         </td>
                         <td>@r.Executor</td>
                         <td><span class="text-sm muted">@r.CreatedAt.LocalDateTime.ToString("HH:mm:ss")</span></td>
+                        <td>
+                            @if (r.CanStop)
+                            {
+                                <button class="btn btn-error btn-sm" @onclick="() => StopAsync(r.Id)">Stop</button>
+                            }
+                        </td>
                     </tr>
                 }
-                @if (_rows.Count == 0)
+                @if (_filtered.Count == 0)
                 {
-                    <tr><td colspan="5" class="empty-state">No runs yet — start one from <a href="/jobs">Jobs</a>.</td></tr>
+                    <tr><td colspan="6" class="empty-state">No @(_state?.ToString().ToLowerInvariant()) runs.</td></tr>
                 }
             </tbody>
         </table>
@@ -52,17 +46,22 @@
 </div>
 
 @code {
+    [Parameter] public string? Status { get; set; }
+
     private IReadOnlyList<RunRow> _rows = [];
-    private IReadOnlyList<RunRow> _latest = [];
+    private IReadOnlyList<RunRow> _filtered = [];
+    private RunState? _state;
 
-    private record Stat(RunState State, int Count);
-    private IEnumerable<Stat> Stats =>
-        new[] { RunState.Pending, RunState.Running, RunState.Success, RunState.Failed }
-            .Select(s => new Stat(s, _rows.Count(r => r.State == s)));
+    private string Title => _state is { } s ? $"{s} runs" : "All runs";
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
+        _state = Enum.TryParse<RunState>(Status, ignoreCase: true, out var s) ? s : null;
         await RefreshAsync();
+    }
+
+    protected override void OnInitialized()
+    {
         Store.ExecutionChanged += OnChanged;
         Store.WorkflowChanged += OnWorkflowChanged;
     }
@@ -70,7 +69,7 @@
     private async Task RefreshAsync()
     {
         _rows = await RunListing.LoadAsync(Store);
-        _latest = _rows.Take(10).ToList();
+        _filtered = _state is { } s ? _rows.Where(r => r.State == s).ToList() : _rows;
     }
 
     private void OnChanged(JobExecution e) => _ = RefreshOnUi();
@@ -79,15 +78,7 @@
     private async Task RefreshOnUi() =>
         await InvokeAsync(async () => { await RefreshAsync(); StateHasChanged(); });
 
-    private static string StatLink(RunState s) => $"/runs/{s.ToString().ToLowerInvariant()}";
-
-    private static string ValueClass(RunState s) => s switch
-    {
-        RunState.Success => "text-success",
-        RunState.Failed => "text-error",
-        RunState.Running => "text-primary",
-        _ => "",
-    };
+    private async Task StopAsync(string id) => await Scheduler.StopAsync(id);
 
     public void Dispose()
     {
