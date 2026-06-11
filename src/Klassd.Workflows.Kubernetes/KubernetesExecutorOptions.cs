@@ -10,6 +10,13 @@ public sealed class KubernetesExecutorOptions
     /// <summary>Namespace the per-job Kubernetes Jobs are created in.</summary>
     public string Namespace { get; set; } = "default";
 
+    /// <summary>
+    /// Container imagePullPolicy ("Always" | "IfNotPresent" | "Never"). Null leaves it unset, so
+    /// Kubernetes applies its default (Always for a <c>:latest</c> tag, IfNotPresent otherwise).
+    /// Set "Never" when the image is pre-loaded onto the node (e.g. a local kind/K3s cluster).
+    /// </summary>
+    public string? ImagePullPolicy { get; set; }
+
     /// <summary>Use in-cluster service account config (true when the scheduler itself runs in K8s).</summary>
     public bool InCluster { get; set; }
 

@@ -116,6 +116,7 @@ public sealed class KubernetesJobExecutor : IJobExecutor
                             {
                                 Name = "worker",
                                 Image = _options.WorkerImage,
+                                ImagePullPolicy = _options.ImagePullPolicy,
                                 Env = env,
                                 Resources = JobResourceResolver.Resolve(exec.JobTypeName, _options)
                             }
@@ -144,8 +145,7 @@ public sealed class KubernetesJobExecutor : IJobExecutor
                 podName, _options.Namespace, follow: true);
             using var reader = new StreamReader(response.Body);
 
-            string? line;
-            while ((line = await reader.ReadLineAsync()) is not null)
+            while (await reader.ReadLineAsync() is { } line)
                 await WorkerOutputProcessor.ProcessLineAsync(_store, exec, line);
 
             // If the worker never reported a terminal state, infer it from the pod.
