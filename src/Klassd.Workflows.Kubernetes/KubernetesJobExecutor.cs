@@ -27,6 +27,7 @@ public sealed class KubernetesJobExecutor : IJobExecutor
     // log request then fails with "a container name must be specified".
     private const string WorkerContainerName = "worker";
     private const string JobContainerName = "container";
+    private const string CaptureContainerName = "klassd-capture";
 
     public string Name => "kubernetes";
 
@@ -98,6 +99,9 @@ public sealed class KubernetesJobExecutor : IJobExecutor
             artifactSettings["dir"] = _options.ArtifactDir;
         env.Add(new V1EnvVar { Name = WorkerProtocol.EnvArtifactProvider, Value = _options.ArtifactProvider });
         env.Add(new V1EnvVar { Name = WorkerProtocol.EnvArtifactSettings, Value = JsonSerializer.Serialize(artifactSettings) });
+        // Declarative file outputs the worker reads (and publishes) after the job runs.
+        if (exec.FileOutputs.Count > 0)
+            env.Add(new V1EnvVar { Name = WorkerProtocol.EnvOutputSpecs, Value = JsonSerializer.Serialize(exec.FileOutputs) });
 
         return new V1Job
         {
@@ -387,6 +391,17 @@ public sealed class KubernetesJobExecutor : IJobExecutor
                 FailureThreshold = 60
             };
 
+        // Declarative file outputs: a shared emptyDir per output directory (mounted into the node's
+        // container) plus a capture native-sidecar that reads the files when the node finishes.
+        var (foVolumes, foMounts, captureSidecar) = BuildOutputCapture(exec.FileOutputs.Concat(spec.FileOutputs).ToList());
+        if (foMounts.Count > 0)
+            container.VolumeMounts = (container.VolumeMounts ?? new List<V1VolumeMount>()).Concat(foMounts).ToList();
+
+        var initContainers = BuildInitContainers(exec) ?? new List<V1Container>();
+        if (captureSidecar is not null) initContainers.Add(captureSidecar);   // last: starts after any real init containers
+        var volumes = BuildVolumes(exec) ?? new List<V1Volume>();
+        volumes.AddRange(foVolumes);
+
         return new V1Job
         {
             Metadata = new V1ObjectMeta
@@ -412,13 +427,53 @@ public sealed class KubernetesJobExecutor : IJobExecutor
                         NodeSelector = BuildNodeSelector(exec),
                         Tolerations = BuildTolerations(exec),
                         Affinity = BuildAffinity(exec),
-                        InitContainers = BuildInitContainers(exec),
-                        Volumes = BuildVolumes(exec),
+                        InitContainers = initContainers.Count > 0 ? initContainers : null,
+                        Volumes = volumes.Count > 0 ? volumes : null,
                         Containers = new List<V1Container> { container }
                     }
                 }
             }
         };
+    }
+
+    /// <summary>
+    /// Builds the file-output capture for a container node: one emptyDir per distinct output directory
+    /// (mounted into the node container) and a capture native-sidecar (the worker image in capture
+    /// mode) that shares those volumes and, when the node finishes, reads the files / defaults and
+    /// emits <c>##OUTPUT##</c> lines the executor collects. Empty when the node declares no file outputs.
+    /// </summary>
+    private (List<V1Volume> volumes, List<V1VolumeMount> mounts, V1Container? sidecar) BuildOutputCapture(
+        IReadOnlyList<OutputSpec> outputs)
+    {
+        if (outputs.Count == 0) return (new(), new(), null);
+
+        var volumes = new List<V1Volume>();
+        var mounts = new List<V1VolumeMount>();
+        var i = 0;
+        foreach (var dir in outputs.Select(o => PosixDir(o.Path)).Where(d => d.Length > 0).Distinct())
+        {
+            var name = $"klassd-out-{i++}";
+            volumes.Add(new V1Volume { Name = name, EmptyDir = new V1EmptyDirVolumeSource() });
+            mounts.Add(new V1VolumeMount { Name = name, MountPath = dir });
+        }
+
+        var sidecar = new V1Container
+        {
+            Name = CaptureContainerName,
+            Image = _options.WorkerImage,
+            ImagePullPolicy = _options.ImagePullPolicy,
+            RestartPolicy = "Always",   // native sidecar: started before, SIGTERM'd after the main container exits
+            Env = new List<V1EnvVar> { new() { Name = WorkerProtocol.EnvCaptureOutputs, Value = JsonSerializer.Serialize(outputs) } },
+            VolumeMounts = mounts.ToList(),
+        };
+        return (volumes, mounts, sidecar);
+    }
+
+    /// <summary>Directory part of a POSIX (container) path; "" when there's no directory.</summary>
+    private static string PosixDir(string path)
+    {
+        var idx = path.LastIndexOf('/');
+        return idx <= 0 ? "" : path[..idx];
     }
 
     /// <summary>
@@ -461,7 +516,14 @@ public sealed class KubernetesJobExecutor : IJobExecutor
                 return;
             }
 
-            var phase = await ReadPodPhaseAsync(jobName);
+            // With a capture sidecar the pod isn't terminal until the sidecar has emitted its outputs
+            // and exited, so wait for a terminal phase rather than trusting the main log stream's end.
+            var hasFileOutputs = current.FileOutputs.Count > 0 || (current.Container?.FileOutputs.Count ?? 0) > 0;
+            var phase = hasFileOutputs ? await WaitForTerminalPhaseAsync(jobName) : await ReadPodPhaseAsync(jobName);
+
+            if (hasFileOutputs)
+                await CollectCaptureOutputsAsync(podName, current);
+
             current.Status = phase == "Succeeded" ? JobStatus.Succeeded : JobStatus.Failed;
             if (current.Status == JobStatus.Failed) current.Error = $"Container ended in phase '{phase}'.";
             current.FinishedAt = DateTimeOffset.UtcNow;
@@ -514,6 +576,37 @@ public sealed class KubernetesJobExecutor : IJobExecutor
 
             await Task.Delay(TimeSpan.FromSeconds(1));
         }
+    }
+
+    /// <summary>Polls the pod phase until it's terminal (Succeeded/Failed) — used when a capture sidecar keeps the pod alive past the main container's exit.</summary>
+    private async Task<string?> WaitForTerminalPhaseAsync(string jobName)
+    {
+        for (var i = 0; i < 180; i++)
+        {
+            var phase = await ReadPodPhaseAsync(jobName);
+            if (phase is "Succeeded" or "Failed") return phase;
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+        return await ReadPodPhaseAsync(jobName);
+    }
+
+    /// <summary>Reads the capture sidecar's log and merges its <c>##OUTPUT##</c> lines into the execution's outputs.</summary>
+    private async Task CollectCaptureOutputsAsync(string podName, JobExecution current)
+    {
+        try
+        {
+            using var resp = await _client.CoreV1.ReadNamespacedPodLogWithHttpMessagesAsync(
+                podName, _options.Namespace, container: CaptureContainerName);
+            using var reader = new StreamReader(resp.Body);
+            while (await reader.ReadLineAsync() is { } line)
+            {
+                if (!line.StartsWith(WorkerProtocol.OutputPrefix, StringComparison.Ordinal)) continue;
+                var rest = line[WorkerProtocol.OutputPrefix.Length..].TrimStart();
+                var sp = rest.IndexOf(' ');           // first space delimits key from value (value may contain spaces)
+                if (sp > 0) current.Outputs[rest[..sp]] = rest[(sp + 1)..];
+            }
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Failed reading capture outputs for pod {Pod}", podName); }
     }
 
     private async Task<string?> ReadPodPhaseAsync(string jobName)

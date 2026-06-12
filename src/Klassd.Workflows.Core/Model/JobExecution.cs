@@ -73,6 +73,9 @@ public sealed class JobExecution
     /// <summary>Node-level affinity (from <see cref="WorkflowNode.Affinity"/>).</summary>
     public AffinitySpec? Affinity { get; set; }
 
+    /// <summary>Declarative file outputs to capture after this execution runs (from the node / container spec).</summary>
+    public List<OutputSpec> FileOutputs { get; set; } = new();
+
     // --- DAG linkage (null for standalone jobs) ---
     public string? WorkflowRunId { get; set; }
     public string? NodeName { get; set; }

@@ -54,6 +54,9 @@ public sealed class WorkflowNode
     /// <summary>Affinity for this node's pod; overrides the executor-wide default when set.</summary>
     public AffinitySpec? Affinity { get; init; }
 
+    /// <summary>Declarative file outputs: read after the node runs and published as node outputs (with defaults).</summary>
+    public IReadOnlyList<OutputSpec> FileOutputs { get; init; } = Array.Empty<OutputSpec>();
+
     /// <summary>
     /// A long-running "service" (daemon) node: it starts, becomes ready, and keeps running while
     /// dependents use it; the engine tears it down once the rest of the run finishes. Readiness
@@ -92,9 +95,10 @@ public sealed class WorkflowNode
 /// <summary>
 /// Fan-out: read <see cref="SourceNode"/>'s output <see cref="OutputKey"/> as a
 /// JSON array and start one execution per element, exposing each element as the
-/// argument named <see cref="ItemArgument"/>.
+/// argument named <see cref="ItemArgument"/>. <see cref="MaxParallelism"/> caps how many
+/// of those executions run at once (0 = unlimited) so a large list doesn't spawn N pods at once.
 /// </summary>
-public sealed record FanOutSpec(string SourceNode, string OutputKey, string ItemArgument);
+public sealed record FanOutSpec(string SourceNode, string OutputKey, string ItemArgument, int MaxParallelism = 0);
 
 /// <summary>Read-only view of completed nodes' outputs, passed to a node's <c>when</c> condition.</summary>
 public interface IWorkflowOutputs

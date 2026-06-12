@@ -38,4 +38,13 @@ public static class WorkerProtocol
     public const string EnvArtifactProvider = "KLASSD_ARTIFACT_PROVIDER"; // provider name: file | gcs | s3 | custom
     public const string EnvArtifactSettings = "KLASSD_ARTIFACT_SETTINGS"; // JSON object of provider settings
     public const string EnvPodIp = "KLASSD_POD_IP";       // the pod's own IP (downward API); empty when run locally
+    public const string EnvOutputSpecs = "KLASSD_OUTPUT_SPECS"; // JSON array of declared file outputs {Name,Path,Default}
+
+    /// <summary>
+    /// Switches the worker into capture-sidecar mode (no job): it shares the outputs volume with an
+    /// arbitrary-container node and, on SIGTERM (after the main container exits), reads the declared
+    /// files / defaults and emits <see cref="OutputPrefix"/> lines. Value is the same JSON as
+    /// <see cref="EnvOutputSpecs"/>.
+    /// </summary>
+    public const string EnvCaptureOutputs = "KLASSD_CAPTURE_OUTPUTS";
 }

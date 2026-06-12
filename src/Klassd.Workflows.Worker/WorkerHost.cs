@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 using System.Text.Json;
 using Klassd.Workflows.Abstractions;
+using Klassd.Workflows.Core.Model;
 using Klassd.Workflows.Core.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -27,6 +28,11 @@ public static class WorkerHost
     public static async Task<int> RunAsync(string[]? args = null)
     {
         var stdout = Console.Out;
+
+        // Capture-sidecar mode: no job — just wait for the main container to exit, then publish its
+        // declared file outputs. Used for arbitrary-container nodes (see RunCaptureAsync).
+        if (Environment.GetEnvironmentVariable(WorkerProtocol.EnvCaptureOutputs) is { Length: > 0 } captureJson)
+            return await RunCaptureAsync(captureJson, stdout);
 
         string jobId = Environment.GetEnvironmentVariable(WorkerProtocol.EnvJobId) ?? "unknown";
         string jobName = Environment.GetEnvironmentVariable(WorkerProtocol.EnvJobName) ?? "unknown";
@@ -101,6 +107,9 @@ public static class WorkerHost
         {
             context.Log($"Starting {jobName} ({jobType})");
             await job.RunAsync(context);
+            // Declarative file outputs: read the files the job wrote (or fall back to defaults) and
+            // publish them as node outputs, before reporting success.
+            EmitFileOutputs(Environment.GetEnvironmentVariable(WorkerProtocol.EnvOutputSpecs), context.SetOutput);
             stdout.WriteLine($"{WorkerProtocol.StatePrefix} Succeeded");
             stdout.Flush();
             return 0;
@@ -116,6 +125,54 @@ public static class WorkerHost
             stdout.WriteLine($"{WorkerProtocol.LogPrefix} {ex}");
             stdout.Flush();
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// Capture-sidecar mode for arbitrary-container nodes: this runs alongside the node's container
+    /// (as a Kubernetes native sidecar) sharing the outputs volume. It idles until the main container
+    /// exits — at which point Kubernetes sends it SIGTERM — then reads the declared output files (or
+    /// their defaults) from the shared volume and emits them as <c>##OUTPUT##</c> lines the executor
+    /// collects from this container's log.
+    /// </summary>
+    private static async Task<int> RunCaptureAsync(string specsJson, TextWriter stdout)
+    {
+        var done = new TaskCompletionSource();
+        void Emit()
+        {
+            EmitFileOutputs(specsJson, (k, v) => stdout.WriteLine($"{WorkerProtocol.OutputPrefix} {k} {v}"));
+            stdout.Flush();
+            done.TrySetResult();
+        }
+        using var sigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, ctx => { ctx.Cancel = true; Emit(); });
+        using var sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, ctx => { ctx.Cancel = true; Emit(); });
+        await done.Task;
+        return 0;
+    }
+
+    /// <summary>
+    /// Reads each declared output file (trimmed) — or its default when the file is missing/empty —
+    /// and publishes it via <paramref name="setOutput"/>. Used both in-pod after an IJob runs and in
+    /// the capture sidecar for container nodes.
+    /// </summary>
+    private static void EmitFileOutputs(string? specsJson, Action<string, string> setOutput)
+    {
+        if (string.IsNullOrWhiteSpace(specsJson)) return;
+        List<OutputSpec>? specs;
+        try { specs = JsonSerializer.Deserialize<List<OutputSpec>>(specsJson); }
+        catch { return; }
+
+        foreach (var s in specs ?? [])
+        {
+            string? value = null;
+            try
+            {
+                if (File.Exists(s.Path) && File.ReadAllText(s.Path).Trim() is { Length: > 0 } content)
+                    value = content;
+            }
+            catch { /* unreadable -> fall back to default */ }
+            value ??= s.Default;
+            if (value is not null) setOutput(s.Name, value);
         }
     }
 

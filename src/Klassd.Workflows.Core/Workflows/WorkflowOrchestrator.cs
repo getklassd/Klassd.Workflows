@@ -124,7 +124,7 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
             foreach (var node in run.Nodes.Where(n => n.Status == NodeRunStatus.Running))
                 changed |= node.IsService
                     ? await SettleServiceNodeAsync(node)
-                    : await SettleNodeAsync(node, def);
+                    : await SettleNodeAsync(run.Id, node, def);
 
             // 2. Omit/skip/start pending nodes.
             foreach (var node in run.Nodes.Where(n => n.Status == NodeRunStatus.Pending))
@@ -189,7 +189,7 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
     }
 
     /// <summary>Advances a running node: retries failed attempts, settles to Succeeded/Failed when stable.</summary>
-    private async Task<bool> SettleNodeAsync(NodeRun node, WorkflowDefinition def)
+    private async Task<bool> SettleNodeAsync(string runId, NodeRun node, WorkflowDefinition def)
     {
         var defNode = def.Node(node.Name)!;
         var maxAttempts = defNode.MaxAttempts;
@@ -198,6 +198,10 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
 
         foreach (var task in node.Tasks)
         {
+            // A task that hasn't started yet (held back by fan-out MaxParallelism) keeps the node in
+            // flight; it'll be started below as slots free.
+            if (task.Attempts.Count == 0) { anyInFlight = true; continue; }
+
             var current = task.Current is null ? null : await _store.GetAsync(task.Current);
             if (current is null || !current.IsTerminal) { anyInFlight = true; continue; }
             if (current.Status == JobStatus.Succeeded) continue;
@@ -213,6 +217,9 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
             }
             // else: this task has permanently failed.
         }
+
+        // Fill freed slots with any held-back fan-out tasks.
+        changed |= await StartReadyTasksAsync(runId, node, defNode);
 
         if (anyInFlight) return changed;
 
@@ -290,17 +297,43 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
 
             foreach (var item in items)
                 node.Tasks.Add(new NodeTask { Arguments = new(args) { [fan.ItemArgument] = item } });
-            _logger.LogInformation("Run {Run} node {Node}: fanned out into {Count}", run.Id, node.Name, items.Count);
+            _logger.LogInformation("Run {Run} node {Node}: fanned out into {Count} (max parallel {Max})",
+                run.Id, node.Name, items.Count, fan.MaxParallelism == 0 ? "∞" : fan.MaxParallelism.ToString());
         }
         else
         {
             node.Tasks.Add(new NodeTask { Arguments = args });
         }
 
-        foreach (var task in node.Tasks)
-            await StartAttemptAsync(run.Id, node, task, defNode);
-
         node.Status = NodeRunStatus.Running;
+        await StartReadyTasksAsync(run.Id, node, defNode);   // honours fan-out MaxParallelism
+    }
+
+    /// <summary>
+    /// Starts not-yet-started tasks of a node up to its fan-out <c>MaxParallelism</c> (0 = unlimited),
+    /// counting currently-running tasks against the cap. Called when the node starts and again as
+    /// running tasks finish, so a capped fan-out drip-feeds its executions.
+    /// </summary>
+    private async Task<bool> StartReadyTasksAsync(string runId, NodeRun node, WorkflowNode defNode)
+    {
+        var max = defNode.FanOut?.MaxParallelism ?? 0;
+        var running = 0;
+        if (max > 0)
+            foreach (var t in node.Tasks.Where(t => t.Attempts.Count > 0))
+            {
+                var cur = await _store.GetAsync(t.Current!);
+                if (cur is not null && !cur.IsTerminal) running++;
+            }
+
+        var changed = false;
+        foreach (var task in node.Tasks.Where(t => t.Attempts.Count == 0))
+        {
+            if (max > 0 && running >= max) break;
+            await StartAttemptAsync(runId, node, task, defNode);
+            running++;
+            changed = true;
+        }
+        return changed;
     }
 
     private async Task StartAttemptAsync(string runId, NodeRun node, NodeTask task, WorkflowNode defNode)
@@ -328,6 +361,7 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
         exec.NodeSelector = new Dictionary<string, string>(defNode.NodeSelector);
         exec.Tolerations = defNode.Tolerations.ToList();
         exec.Affinity = defNode.Affinity;
+        exec.FileOutputs = defNode.FileOutputs.ToList();
         await _store.UpdateAsync(exec);
         task.Attempts.Add(exec.Id);
         await _executor.StartAsync(exec);

@@ -70,4 +70,7 @@ public sealed class ContainerSpec
 
     /// <summary>Affinity for this container's pod; overrides the executor-wide default when set.</summary>
     public AffinitySpec? Affinity { get; init; }
+
+    /// <summary>Declarative file outputs read (by a capture sidecar) after the container runs and published as outputs.</summary>
+    public IReadOnlyList<OutputSpec> FileOutputs { get; init; } = Array.Empty<OutputSpec>();
 }

@@ -119,6 +119,7 @@ public sealed class NodeBuilder
     private SecurityContextSpec? _securityContext;
     private PodSecurityContextSpec? _podSecurityContext;
     private readonly List<EnvFromSpec> _envFrom = new();
+    private readonly List<OutputSpec> _fileOutputs = new();
     private readonly Dictionary<string, string> _nodeSelector = new();
     private readonly List<TolerationSpec> _tolerations = new();
     private AffinitySpec? _affinity;
@@ -270,10 +271,26 @@ public sealed class NodeBuilder
         return this;
     }
 
-    /// <summary>Fan out: one execution per element of sourceNode's JSON-array output.</summary>
-    public NodeBuilder FanOutOver(string sourceNode, string outputKey, string itemArgument)
+    /// <summary>
+    /// Capture a node output from a file the step writes (Argo's <c>valueFrom.path</c> + <c>default</c>):
+    /// after the node runs, the file at <paramref name="path"/> is read (trimmed) and published as the
+    /// output <paramref name="name"/>; if it's missing or empty, <paramref name="default"/> is used.
+    /// Works for both <c>IJob</c> and container nodes.
+    /// </summary>
+    public NodeBuilder WithFileOutput(string name, string path, string? @default = null)
     {
-        _fanOut = new FanOutSpec(sourceNode, outputKey, itemArgument);
+        _fileOutputs.Add(new OutputSpec { Name = name, Path = path, Default = @default });
+        return this;
+    }
+
+    /// <summary>
+    /// Fan out: one execution per element of sourceNode's JSON-array output.
+    /// <paramref name="maxParallelism"/> caps how many run concurrently (0 = unlimited), so fanning
+    /// out over a large list doesn't spin up that many pods at once.
+    /// </summary>
+    public NodeBuilder FanOutOver(string sourceNode, string outputKey, string itemArgument, int maxParallelism = 0)
+    {
+        _fanOut = new FanOutSpec(sourceNode, outputKey, itemArgument, Math.Max(0, maxParallelism));
         if (!_deps.Contains(sourceNode)) _deps.Add(sourceNode);
         return this;
     }
@@ -301,6 +318,7 @@ public sealed class NodeBuilder
         SecurityContext = _securityContext,
         PodSecurityContext = _podSecurityContext,
         EnvFrom = _envFrom,
+        FileOutputs = _fileOutputs,
         NodeSelector = _nodeSelector,
         Tolerations = _tolerations,
         Affinity = _affinity,

@@ -82,6 +82,8 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
             artifactSettings["dir"] = _options.ArtifactDir;
         psi.Environment[WorkerProtocol.EnvArtifactProvider] = _options.ArtifactProvider;
         psi.Environment[WorkerProtocol.EnvArtifactSettings] = JsonSerializer.Serialize(artifactSettings);
+        if (exec.FileOutputs.Count > 0)
+            psi.Environment[WorkerProtocol.EnvOutputSpecs] = JsonSerializer.Serialize(exec.FileOutputs);
 
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
@@ -155,6 +157,27 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
             if (!k.StartsWith("__", StringComparison.Ordinal)) { args.Add("-e"); args.Add($"{k}={v}"); }
         args.Add("-e"); args.Add($"{WorkerProtocol.EnvPodIp}=127.0.0.1");
 
+        // Declarative file outputs: bind-mount a host temp dir per output directory so we can read the
+        // files back after the (run-to-completion) container exits. Services don't produce outputs.
+        var outputReads = new List<(OutputSpec spec, string hostPath)>();
+        if (!exec.IsService)
+        {
+            var dirMap = new Dictionary<string, string>();
+            foreach (var o in spec.FileOutputs.Concat(exec.FileOutputs))
+            {
+                var dir = PosixDir(o.Path);
+                if (dir.Length == 0) continue;
+                if (!dirMap.TryGetValue(dir, out var hostDir))
+                {
+                    hostDir = Path.Combine(Path.GetTempPath(), $"klassd-out-{exec.Id}", $"d{dirMap.Count}");
+                    Directory.CreateDirectory(hostDir);
+                    dirMap[dir] = hostDir;
+                    args.Add("-v"); args.Add($"{hostDir}:{dir}");
+                }
+                outputReads.Add((o, Path.Combine(hostDir, o.Path[(o.Path.LastIndexOf('/') + 1)..])));
+            }
+        }
+
         var command = spec.Command.ToList();
         if (command.Count > 0) { args.Add("--entrypoint"); args.Add(command[0]); }
         args.Add(spec.Image);
@@ -164,7 +187,13 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
         if (exec.IsService)
             await StartServiceContainerAsync(exec, spec, args);
         else
-            _ = Task.Run(() => RunContainerToCompletionAsync(exec, args));
+            _ = Task.Run(() => RunContainerToCompletionAsync(exec, args, outputReads));
+    }
+
+    private static string PosixDir(string path)
+    {
+        var idx = path.LastIndexOf('/');
+        return idx <= 0 ? "" : path[..idx];
     }
 
     private async Task StartServiceContainerAsync(JobExecution exec, ContainerSpec spec, List<string> runArgs)
@@ -214,7 +243,8 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
         }
     }
 
-    private async Task RunContainerToCompletionAsync(JobExecution exec, List<string> runArgs)
+    private async Task RunContainerToCompletionAsync(JobExecution exec, List<string> runArgs,
+        IReadOnlyList<(OutputSpec spec, string hostPath)>? outputReads = null)
     {
         try
         {
@@ -239,11 +269,30 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
                 current.Status = proc.ExitCode == 0 ? JobStatus.Succeeded : JobStatus.Failed;
                 if (current.Status == JobStatus.Failed) current.Error = $"Container exited with code {proc.ExitCode}.";
                 current.Progress = current.Status == JobStatus.Succeeded ? 100 : current.Progress;
+                CollectFileOutputs(current, outputReads);
                 current.FinishedAt = DateTimeOffset.UtcNow;
                 await _store.UpdateAsync(current);
             }
         }
         catch (Exception ex) { await FailAsync(exec.Id, ex.Message); }
+    }
+
+    // Read each declared output file the container wrote (or fall back to its default) and publish it.
+    private static void CollectFileOutputs(JobExecution exec, IReadOnlyList<(OutputSpec spec, string hostPath)>? outputReads)
+    {
+        if (outputReads is null) return;
+        foreach (var (spec, hostPath) in outputReads)
+        {
+            string? value = null;
+            try
+            {
+                if (File.Exists(hostPath) && File.ReadAllText(hostPath).Trim() is { Length: > 0 } content)
+                    value = content;
+            }
+            catch { /* unreadable -> default */ }
+            value ??= spec.Default;
+            if (value is not null) exec.Outputs[spec.Name] = value;
+        }
     }
 
     private void StreamContainerLogs(string execId, string containerId)
