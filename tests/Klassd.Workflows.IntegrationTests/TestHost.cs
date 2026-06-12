@@ -19,6 +19,7 @@ internal static class TestHost
 {
     public const string SampleWorkflow = "catalog-integration";
     public const string ContainerServiceWorkflow = "container-service";
+    public const string FileOutputFanoutWorkflow = "file-output-fanout";
 
     private static KubernetesCluster? _cluster;
     private static MinioStore? _minio;
@@ -82,6 +83,7 @@ internal static class TestHost
         var registry = _provider.GetRequiredService<IWorkflowRegistry>();
         RegisterSampleWorkflow(registry);
         RegisterContainerServiceWorkflow(registry);
+        RegisterFileOutputFanoutWorkflow(registry);
 
         foreach (var hs in _provider.GetServices<IHostedService>())
         {
@@ -137,5 +139,20 @@ internal static class TestHost
             .Add<HelloWorldJob>("consumer", n => n
                 .DependsOn("web")
                 .BindInput("name", "web", "address"))
+            .Build());
+
+    // End-to-end of the Argo-style `valueFrom.path` + `default` + `withParam`: an arbitrary container
+    // (busybox) writes a JSON array to a file; the engine captures it as the node output "market_ids"
+    // (via the capture sidecar); a downstream IJob fans out over it, capped at 2 concurrent.
+    private static void RegisterFileOutputFanoutWorkflow(IWorkflowRegistry registry) =>
+        registry.Register(new WorkflowBuilder(FileOutputFanoutWorkflow)
+            .AddContainer("markets", KubernetesCluster.BusyboxImage, c => c
+                .WithCommand("sh", "-c")
+                .WithArgs("echo '[\"en-dk_DKK\",\"da-dk_DKK\",\"sv-se_SEK\"]' > /mnt/out/market_ids.json")
+                .WithImagePullPolicy("IfNotPresent")
+                .WithFileOutput("market_ids", "/mnt/out/market_ids.json", @default: "[]"))
+            .Add<HelloWorldJob>("integrate", n => n
+                .DependsOn("markets")
+                .FanOutOver("markets", "market_ids", "name", maxParallelism: 2))
             .Build());
 }

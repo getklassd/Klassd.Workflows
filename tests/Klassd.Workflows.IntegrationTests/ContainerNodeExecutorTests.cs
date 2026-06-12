@@ -192,6 +192,55 @@ public class ContainerNodeExecutorTests
         await Assert.That(Snapshot(exec).Any(l => l.Contains("from-configmap"))).IsTrue();
     }
 
+    [Test, Timeout(180_000)]
+    public async Task Container_file_output_uses_default_when_the_file_is_absent(CancellationToken ct)
+    {
+        // The container writes nothing; the capture sidecar falls back to the declared default.
+        var id = await TestHost.Scheduler.EnqueueContainerAsync("no-file", new ContainerSpec
+        {
+            Image = KubernetesCluster.BusyboxImage,
+            Command = new[] { "sh", "-c" },
+            Args = new[] { "true" },
+            ImagePullPolicy = "IfNotPresent",
+            FileOutputs = new[] { new OutputSpec { Name = "result", Path = "/mnt/out/result.json", Default = "fallback" } },
+        });
+
+        var exec = await WaitForAsync(id, e => e.IsTerminal, ct);
+
+        await Assert.That(exec.Status).IsEqualTo(JobStatus.Succeeded).Because(string.Join("\n", Snapshot(exec)));
+        await Assert.That(exec.Outputs.GetValueOrDefault("result")).IsEqualTo("fallback");
+    }
+
+    [Test, Timeout(300_000)]
+    public async Task Container_file_output_feeds_a_capped_fanout(CancellationToken ct)
+    {
+        // markets (busybox) writes a 3-element JSON array to a file -> captured as "market_ids" via the
+        // capture sidecar -> integrate fans out over it (one execution per market), capped at 2.
+        var runId = await TestHost.Scheduler.EnqueueWorkflowAsync(TestHost.FileOutputFanoutWorkflow);
+
+        WorkflowRun? run = null;
+        var deadline = DateTime.UtcNow.AddMinutes(4);
+        while (DateTime.UtcNow < deadline && !ct.IsCancellationRequested)
+        {
+            run = await TestHost.Store.GetWorkflowRunAsync(runId);
+            if (run is { IsTerminal: true }) break;
+            await Task.Delay(1500, ct);
+        }
+
+        await Assert.That(run).IsNotNull();
+        await Assert.That(run!.Status).IsEqualTo(WorkflowRunStatus.Succeeded).Because(await DiagnoseAsync(run));
+
+        // The file output was captured from the container's pod...
+        var markets = run.Node("markets")!;
+        var marketsExec = await TestHost.Store.GetAsync(markets.ExecutionIds.Last());
+        await Assert.That(marketsExec!.Outputs.GetValueOrDefault("market_ids")).Contains("en-dk_DKK");
+
+        // ...and drove a 3-way fan-out, all succeeded.
+        var integrate = run.Node("integrate")!;
+        await Assert.That(integrate.ExecutionIds.Count()).IsEqualTo(3);
+        await Assert.That(integrate.Status).IsEqualTo(NodeRunStatus.Succeeded);
+    }
+
     [Test, Timeout(240_000)]
     public async Task Container_service_node_becomes_ready_forwards_address_and_is_torn_down(CancellationToken ct)
     {

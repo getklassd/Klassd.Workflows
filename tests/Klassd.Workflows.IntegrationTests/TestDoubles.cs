@@ -53,6 +53,48 @@ internal sealed class NoopOrchestrator : IWorkflowOrchestrator
     public Task<string> StartAsync(string definitionName) => Task.FromResult("noop");
 }
 
+/// <summary>
+/// Executor for the fan-out parallelism test: completes the seed node immediately (publishing the
+/// array the fan-out reads), and holds every other execution "running" briefly before completing it
+/// while tracking the peak number running at once — so a fan-out's MaxParallelism cap is observable.
+/// </summary>
+internal sealed class SeedingProbeExecutor(IJobStore store, string seedNode, (string key, string value) seedOutput)
+    : IJobExecutor
+{
+    private int _running;
+    public int MaxObserved;
+    public string Name => "probe";
+
+    public async Task StartAsync(JobExecution exec, CancellationToken ct = default)
+    {
+        if (exec.NodeName == seedNode)
+        {
+            exec.Outputs[seedOutput.key] = seedOutput.value;
+            exec.Status = JobStatus.Succeeded;
+            exec.Progress = 100;
+            exec.FinishedAt = DateTimeOffset.UtcNow;
+            await store.UpdateAsync(exec);
+            return;
+        }
+
+        var now = Interlocked.Increment(ref _running);
+        MaxObserved = Math.Max(MaxObserved, now);
+        exec.Status = JobStatus.Running;
+        await store.UpdateAsync(exec);
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(60);
+            Interlocked.Decrement(ref _running);
+            exec.Status = JobStatus.Succeeded;
+            exec.Progress = 100;
+            exec.FinishedAt = DateTimeOffset.UtcNow;
+            await store.UpdateAsync(exec);   // raises the change event → orchestrator starts the next held-back task
+        });
+    }
+
+    public Task StopAsync(JobExecution exec, CancellationToken ct = default) => Task.CompletedTask;
+}
+
 internal static class TestWait
 {
     public static async Task<WorkflowRun> RunTerminalAsync(IJobStore store, string runId, int timeoutMs = 15_000)

@@ -48,6 +48,34 @@ public class ServiceNodeOrchestrationTests
         await ((IHostedService)orch).StopAsync(default);
     }
 
+    [Test, Timeout(30_000)]
+    public async Task Fanout_respects_max_parallelism()
+    {
+        var store = new InMemoryJobStore();
+        var registry = new WorkflowRegistry();
+        // "seed" publishes a 6-element array; "work" fans out over it, capped at 2 concurrent.
+        registry.Register(new WorkflowBuilder("fanout-cap")
+            .Add("seed", "Seed")
+            .Add("work", "Work", n => n.FanOutOver("seed", "items", "item", maxParallelism: 2))
+            .Build());
+
+        var executor = new SeedingProbeExecutor(store, seedNode: "seed",
+            seedOutput: ("items", "[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"]"));
+        var orch = new WorkflowOrchestrator(store, executor, registry, NullLogger<WorkflowOrchestrator>.Instance);
+        await ((IHostedService)orch).StartAsync(default);
+
+        var runId = await orch.StartAsync("fanout-cap");
+        var run = await TestWait.RunTerminalAsync(store, runId, 25_000);
+
+        await Assert.That(run.Status).IsEqualTo(WorkflowRunStatus.Succeeded);
+        // All six fan-out items ran...
+        await Assert.That(run.Node("work")!.ExecutionIds.Count()).IsEqualTo(6);
+        // ...but never more than two at once.
+        await Assert.That(executor.MaxObserved).IsLessThanOrEqualTo(2);
+
+        await ((IHostedService)orch).StopAsync(default);
+    }
+
     [Test, Timeout(15_000)]
     public async Task Workflow_of_only_services_completes(CancellationToken cancellationToken)
     {

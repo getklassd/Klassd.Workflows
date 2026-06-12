@@ -166,6 +166,26 @@ public class WorkflowBuilderValidationTests
     }
 
     [Test]
+    public async Task File_outputs_and_fanout_parallelism_attach_to_the_node()
+    {
+        var def = new WorkflowBuilder("ok")
+            .Add("markets", "Markets", n => n
+                .WithFileOutput("market_ids", "/mnt/out/market_ids.json", @default: "[\"en-dk_DKK\"]"))
+            .Add("work", "Work", n => n
+                .FanOutOver("markets", "market_ids", "market", maxParallelism: 5))
+            .Build();
+
+        var markets = def.Node("markets")!;
+        await Assert.That(markets.FileOutputs.Single().Name).IsEqualTo("market_ids");
+        await Assert.That(markets.FileOutputs[0].Path).IsEqualTo("/mnt/out/market_ids.json");
+        await Assert.That(markets.FileOutputs[0].Default).IsEqualTo("[\"en-dk_DKK\"]");
+
+        var work = def.Node("work")!;
+        await Assert.That(work.FanOut!.MaxParallelism).IsEqualTo(5);
+        await Assert.That(work.Dependencies).Contains("markets");
+    }
+
+    [Test]
     public async Task Container_methods_rejected_on_job_node()
     {
         // ServicePort on a non-container node throws while configuring (inside Add).
