@@ -127,8 +127,8 @@ registry.Register(new WorkflowBuilder("catalog-integration")
     // run connects through it, then the engine tears it down at the end.
     .Add<SqlProxyServiceJob>("sql-proxy", n => n.AsService())
     .Add<IntegrationJob>("integration", n => n
-        .DependsOn("markets", "data-proxy", "sql-proxy")
-        .BindInput("db_host", "sql-proxy", "address")   // forwarded service address
+        .DependsOn("markets", "data-proxy")
+        .BindServiceAddress("db_host", "sql-proxy")     // forwarded service address (also adds the dependency)
         .FanOutOver("markets", "market_ids", itemArgument: "market"))
     .Add<PublishJob>("publish", n => n
         .DependsOn("integration")
@@ -169,8 +169,7 @@ if (app.Environment.IsDevelopment())
     registry.Register(new WorkflowBuilder("container-shim-test")
         .AddContainer("proxy", "nginx:alpine", c => c.ServicePort(80).ReadyOnTcp(80).AsService())
         .Add<IntegrationJob>("consumer", n => n
-            .DependsOn("proxy")
-            .BindInput("db_host", "proxy", "address")
+            .BindServiceAddress("db_host", "proxy")
             .WithArgument("market", "test"))
         .Build());
 
@@ -184,8 +183,7 @@ registry.Register(new WorkflowBuilder("cloud-sql-integration")
         .ReadyOnTcp(5432)
         .AsService())
     .Add<IntegrationJob>("integration", n => n
-        .DependsOn("sql-proxy")
-        .BindInput("db_host", "sql-proxy", "address")
+        .BindServiceAddress("db_host", "sql-proxy")
         .WithArgument("market", "default"))
     .Build());
 

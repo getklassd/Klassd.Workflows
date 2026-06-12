@@ -433,8 +433,7 @@ container/job** (`ContainerSpec` / `InitContainerSpec`):
 new WorkflowBuilder("nightly")
     .AddContainer("sql-proxy", "gcr.io/.../cloud-sql-proxy:2.11", c => c.AsService().ServicePort(5432).ReadyOnTcp(5432))
     .Add<CleanupJob>("cleanup", n => n
-        .DependsOn("sql-proxy")
-        .BindInput("db_host", "sql-proxy", "address")
+        .BindServiceAddress("db_host", "sql-proxy")   // {podIP}:5432, and adds the dependency
         .WithInitContainer("migrate", "myorg/migrate:1", "--db", "$(db_host)")
         .WithEmptyDir("scratch").WithVolumeMount("scratch", "/scratch")
         .WithEnvFromSecret("db-creds")
