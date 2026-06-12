@@ -34,12 +34,14 @@ dotnet add package Klassd.Workflows.Dashboard --prerelease          # the live U
 | `Klassd.Workflows.Kubernetes` | `KubernetesJobExecutor` — one `batch/v1` Job per execution. |
 | `Klassd.Workflows.Storage.Postgres` / `.Storage.MongoDb` | Durable `IJobStore` adapters. |
 | `Klassd.Workflows.Artifacts.S3` / `.Artifacts.Gcs` | `IArtifactStore` adapters (large payloads). |
+| `Klassd.Workflows.Worker` | The worker host: `WorkerHost.RunAsync()` loads + runs an `IJob`. Reference it from your own exe (plus your jobs) to build a worker image. |
 | `Klassd.Workflows.Dashboard` | The Blazor (Interactive Server) UI as a Razor Class Library — mount it into your host. |
 
 The core carries **no** Kubernetes/AWS/Google/Mongo/Npgsql dependency — each adapter keeps its SDK
-isolated, so you only pull in what you wire up. The `Worker` project is a reference host (not a
-package): build it into your own image with your job assemblies (see *Run on Kubernetes*). The
-**`Dashboard` ships as a package** (RCL) — mount it into any ASP.NET Core host:
+isolated, so you only pull in what you wire up. **`Klassd.Workflows.Worker` ships as a package**:
+reference it from a one-line exe plus your job assemblies to build your own worker image, or layer
+your job DLLs onto the published base image (see *Run on Kubernetes*). The **`Dashboard` also ships
+as a package** (RCL) — mount it into any ASP.NET Core host:
 
 ```csharp
 builder.Services.AddHttpContextAccessor();          // the dashboard reads a theme cookie during SSR
@@ -124,7 +126,7 @@ code, now one pod per execution.
 | `Klassd.Workflows.Abstractions` | The contract jobs implement: `IJob`, `IJobContext`, and the worker stdout protocol. |
 | `Klassd.Workflows.Core` | Scheduler, in-memory store, cron recurring loop (Cronos), job catalog, and the **local-process executor**. |
 | `Klassd.Workflows.Kubernetes` | `KubernetesJobExecutor` — creates a K8s `Job` per run and tails the pod logs. |
-| `Klassd.Workflows.Worker` | The executor-pod entrypoint. Loads the `IJob` by name, runs it, streams log/progress/state to stdout. |
+| `Klassd.Workflows.Worker` | The executor-pod entrypoint, packaged. `WorkerHost.RunAsync()` loads the `IJob` by name, runs it, streams log/progress/state to stdout. Optional `IWorkerStartup` adds DI. |
 | `Klassd.Workflows.Dashboard` | Blazor Server UI: live job list, per-job console + progress, recurring jobs, DAG runs. Hosts the scheduler. |
 | `Klassd.Workflows.Storage.Postgres` | Durable `IJobStore` on PostgreSQL (jsonb documents + append-only logs). |
 | `Klassd.Workflows.Storage.MongoDb` | Durable `IJobStore` on MongoDB. |
@@ -356,22 +358,42 @@ dotnet run --project samples/Klassd.Workflows.DashboardHost
 ```
 
 `DashboardHost` is the reference host that mounts the `Klassd.Workflows.Dashboard` RCL and wires the
-sample jobs/workflow. Its local executor launches `Klassd.Workflows.Worker.dll` as a child process
-per job. (Build the solution first so the worker output exists.)
+sample jobs/workflow. Its local executor launches the sample worker
+(`Klassd.Workflows.SampleWorker.dll`) as a child process per job. (Build the solution first so the
+worker output exists.)
+
+## Build your own worker image
+
+The worker is a package, so your jobs live in **your** image. Two ways:
+
+```csharp
+// Library path — a one-line exe referencing Klassd.Workflows.Worker + your job assemblies:
+return await Klassd.Workflows.Worker.WorkerHost.RunAsync(args);
+```
+```dockerfile
+# Base-image path — layer your published job DLLs onto the published worker image:
+FROM ghcr.io/getklassd/workflows-worker:latest
+COPY ./my-published-jobs/ /app/        # the worker loads every assembly in /app at startup
+```
+
+Jobs are created via `ActivatorUtilities`, so they can take constructor dependencies — implement
+`IWorkerStartup` in (or beside) your job assembly to register services and the worker discovers it
+automatically, composing configuration from `appsettings[.{ENV}].json`, `/secrets/*.json`, then
+environment variables. Jobs with a parameterless constructor need no startup class.
 
 ## Run on Kubernetes
 
 ```bash
-# 1. Build & push the worker image (from repo root)
-docker build -f src/Klassd.Workflows.Worker/Dockerfile -t <registry>/klassd-workflows-worker:latest .
-docker push <registry>/klassd-workflows-worker:latest
+# 1. Build & push your worker image (see "Build your own worker image" above), e.g.
+docker build -f path/to/your/Worker/Dockerfile -t <registry>/my-worker:latest .
+docker push <registry>/my-worker:latest
 
 # 2. If the dashboard runs in-cluster, grant it RBAC
 kubectl apply -f deploy/rbac.yaml
 
 # 3. Point the dashboard at the K8s executor (config / env)
 #    Klassd.Workflows__Executor=kubernetes
-#    Klassd.Workflows__WorkerImage=<registry>/klassd-workflows-worker:latest
+#    Klassd.Workflows__WorkerImage=<registry>/my-worker:latest
 #    Klassd.Workflows__Namespace=default
 #    Klassd.Workflows__InCluster=true        # when the dashboard itself runs in K8s
 ```
@@ -379,6 +401,38 @@ kubectl apply -f deploy/rbac.yaml
 Each enqueued job becomes a `batch/v1` Job (one pod, `restartPolicy: Never`,
 `backoffLimit: 0`), garbage-collected via `ttlSecondsAfterFinished`. Stopping a
 job deletes its Job; SIGTERM cancels the worker's `CancellationToken`.
+
+### Shaping the pod
+
+The Kubernetes executor lets you control the pod it creates at three scopes that combine:
+**executor-wide** (`KubernetesExecutorOptions`), **per DAG node** (`NodeBuilder`), and **per
+container/job** (`ContainerSpec` / `InitContainerSpec`):
+
+- **Pod annotations & labels** (`PodAnnotations` / `PodLabels`) — stamped on every pod; the seam for
+  sidecar injectors such as the Vault agent that key off pod annotations.
+- **Init containers** — run to completion before the main container, combined in order
+  executor-wide → node → container.
+- **Volumes & mounts** — `emptyDir` / `secret` / `configMap` / PVC / `hostPath`, mounted into the
+  main and init containers (e.g. an init container writes a shared `emptyDir` the job reads).
+- **Security contexts** — pod-level (`runAsUser`/`fsGroup`/`seccomp`/…) and per-container
+  (`readOnlyRootFilesystem`, drop capabilities, …).
+- **Resources** — CPU/memory requests+limits on container nodes/jobs and init containers (worker
+  jobs also honour `[JobResources]` and the `Resources`/`DefaultResources` options).
+- **envFrom** — import a ConfigMap/Secret as environment variables.
+- **Scheduling** — `nodeSelector`, `tolerations`, and `affinity` (node affinity + pod (anti-)affinity).
+
+```csharp
+new WorkflowBuilder("nightly")
+    .AddContainer("sql-proxy", "gcr.io/.../cloud-sql-proxy:2.11", c => c.AsService().ServicePort(5432).ReadyOnTcp(5432))
+    .Add<CleanupJob>("cleanup", n => n
+        .DependsOn("sql-proxy")
+        .BindInput("db_host", "sql-proxy", "address")
+        .WithInitContainer("migrate", "myorg/migrate:1", "--db", "$(db_host)")
+        .WithEmptyDir("scratch").WithVolumeMount("scratch", "/scratch")
+        .WithEnvFromSecret("db-creds")
+        .WithNodeSelector("pool", "batch")
+        .WithSecurityContext(new() { RunAsNonRoot = true, ReadOnlyRootFilesystem = true }));
+```
 
 ## Status / next steps
 
