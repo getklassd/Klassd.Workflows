@@ -1,7 +1,9 @@
 @page "/jobs"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @inject IJobCatalog Catalog
 @inject IWorkflowRegistry Registry
+@inject IContainerJobRegistry ContainerJobs
 @inject IJobStore Store
 @inject IJobScheduler Scheduler
 @inject NavigationManager Nav
@@ -30,7 +32,7 @@
                                 <span class="badge badge-ghost badge-sm" style="margin-left:8px;">@r.Inputs.Count input@(r.Inputs.Count == 1 ? "" : "s")</span>
                             }
                         </td>
-                        <td><span class="badge @(r.Kind == RunKind.Workflow ? "badge-info" : "badge-ghost")">@r.Kind</span></td>
+                        <td><span class="badge @KindBadge(r.Kind)">@(r.Kind == RunKind.Container ? "Container" : r.Kind.ToString())</span></td>
                         <td>
                             @if (rec is not null)
                             {
@@ -111,8 +113,15 @@
 }
 
 @code {
-    private enum RunKind { Job, Workflow }
+    private enum RunKind { Job, Workflow, Container }
     private sealed record Runnable(RunKind Kind, string Key, string DisplayName, IReadOnlyList<JobInputInfo> Inputs);
+
+    private static string KindBadge(RunKind k) => k switch
+    {
+        RunKind.Workflow => "badge-info",
+        RunKind.Container => "badge-accent",
+        _ => "badge-ghost"
+    };
 
     private IReadOnlyList<Runnable> _runnables = [];
     private IReadOnlyList<RecurringJob> _recurring = [];
@@ -135,17 +144,21 @@
             .Select(j => new Runnable(RunKind.Job, j.TypeName, j.DisplayName, j.Inputs));
         var workflows = Registry.All
             .Select(w => new Runnable(RunKind.Workflow, w.Name, w.Name, []));
+        var containers = ContainerJobs.All
+            .Select(c => new Runnable(RunKind.Container, c.Name, c.Name, []));
 
-        _runnables = jobs.Concat(workflows).OrderBy(r => r.DisplayName).ToList();
+        _runnables = jobs.Concat(workflows).Concat(containers).OrderBy(r => r.DisplayName).ToList();
         await RefreshRecurringAsync();
     }
 
     private async Task RefreshRecurringAsync() => _recurring = await Store.ListRecurringAsync();
 
-    private RecurringJob? Recurring(Runnable r) => _recurring.FirstOrDefault(rec =>
-        r.Kind == RunKind.Workflow
-            ? rec.Kind == RecurringKind.Workflow && rec.WorkflowName == r.Key
-            : rec.Kind == RecurringKind.Job && rec.JobTypeName == r.Key);
+    private RecurringJob? Recurring(Runnable r) => _recurring.FirstOrDefault(rec => r.Kind switch
+    {
+        RunKind.Workflow => rec.Kind == RecurringKind.Workflow && rec.WorkflowName == r.Key,
+        RunKind.Container => rec.Kind == RecurringKind.Container && rec.JobTypeName == r.Key,
+        _ => rec.Kind == RecurringKind.Job && rec.JobTypeName == r.Key
+    });
 
     private void Launch(Runnable r)
     {
@@ -189,6 +202,8 @@
         string execId;
         if (r.Kind == RunKind.Workflow)
             execId = await Scheduler.EnqueueWorkflowAsync(r.Key);
+        else if (r.Kind == RunKind.Container && ContainerJobs.Get(r.Key) is { } def)
+            execId = await Scheduler.EnqueueContainerAsync(def.Name, def.Container, args);
         else
             execId = await Scheduler.EnqueueAsync(r.Key, args);
 

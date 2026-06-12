@@ -35,6 +35,19 @@ public sealed class WorkflowBuilder
         return this;
     }
 
+    /// <summary>
+    /// Add a node that runs an arbitrary container image (e.g. <c>cloud-sql-proxy</c>) instead of an
+    /// <c>IJob</c>. Combine with <c>.AsService()</c> for a long-running sidecar whose address is
+    /// forwarded to dependents.
+    /// </summary>
+    public WorkflowBuilder AddContainer(string nodeName, string image, Action<NodeBuilder>? configure = null)
+    {
+        var nb = new NodeBuilder(nodeName, image, isContainer: true);
+        configure?.Invoke(nb);
+        _nodes.Add(nb);
+        return this;
+    }
+
     public WorkflowDefinition Build()
     {
         var nodes = _nodes.Select(n => n.Build()).ToList();
@@ -54,6 +67,13 @@ public sealed class WorkflowBuilder
             if (n.FanOut is { } f && !n.Dependencies.Contains(f.SourceNode))
                 throw new InvalidOperationException(
                     $"Node '{n.Name}' fans out over '{f.SourceNode}' but does not depend on it.");
+
+            if (n.IsService && n.FanOut is not null)
+                throw new InvalidOperationException($"Service node '{n.Name}' cannot fan out.");
+
+            if (string.IsNullOrEmpty(n.JobTypeName) == (n.Container is null))
+                throw new InvalidOperationException(
+                    $"Node '{n.Name}' must run exactly one of an IJob type or a container image.");
         }
         DetectCycles(nodes);
     }
@@ -84,18 +104,69 @@ public sealed class NodeBuilder
 {
     private readonly string _name;
     private readonly string _jobType;
+    private readonly bool _isContainer;
+    private readonly string? _image;
     private readonly List<string> _deps = new();
     private readonly Dictionary<string, string> _args = new();
     private readonly Dictionary<string, string> _bindings = new();
     private FanOutSpec? _fanOut;
     private int _maxRetries;
     private Func<IWorkflowOutputs, bool>? _condition;
+    private bool _isService;
+
+    // Container-node fields (only when _isContainer).
+    private readonly List<string> _command = new();
+    private readonly List<string> _containerArgs = new();
+    private readonly Dictionary<string, string> _containerEnv = new();
+    private int? _servicePort;
+    private int? _readyTcpPort;
+    private string? _imagePullPolicy;
 
     internal NodeBuilder(string name, string jobType) { _name = name; _jobType = jobType; }
+
+    internal NodeBuilder(string name, string image, bool isContainer)
+    {
+        _name = name;
+        _jobType = "";
+        _isContainer = isContainer;
+        _image = image;
+    }
 
     public NodeBuilder DependsOn(params string[] nodes) { _deps.AddRange(nodes); return this; }
 
     public NodeBuilder WithArgument(string key, string value) { _args[key] = value; return this; }
+
+    /// <summary>
+    /// Make this a long-running "service" (daemon) node: it starts, becomes ready, and stays running
+    /// while dependents use it; the engine tears it down once the rest of the run finishes. Readiness
+    /// (not exit) unblocks dependents. Cannot be combined with fan-out.
+    /// </summary>
+    public NodeBuilder AsService() { _isService = true; return this; }
+
+    // ── Container-node configuration (only valid on AddContainer nodes) ──────────
+    /// <summary>Override the image entrypoint (container <c>command</c>).</summary>
+    public NodeBuilder WithCommand(params string[] command) { RequireContainer(); _command.AddRange(command); return this; }
+
+    /// <summary>Set the container <c>args</c>.</summary>
+    public NodeBuilder WithArgs(params string[] args) { RequireContainer(); _containerArgs.AddRange(args); return this; }
+
+    /// <summary>Add a static environment variable to the container.</summary>
+    public NodeBuilder WithEnv(string key, string value) { RequireContainer(); _containerEnv[key] = value; return this; }
+
+    /// <summary>The port the container serves on; the engine publishes <c>address</c>=<c>ip:port</c> + <c>ip</c> outputs.</summary>
+    public NodeBuilder ServicePort(int port) { RequireContainer(); _servicePort = port; return this; }
+
+    /// <summary>Consider the node ready only once this TCP port accepts connections.</summary>
+    public NodeBuilder ReadyOnTcp(int port) { RequireContainer(); _readyTcpPort = port; return this; }
+
+    /// <summary>Set the container imagePullPolicy ("Always" | "IfNotPresent" | "Never").</summary>
+    public NodeBuilder WithImagePullPolicy(string policy) { RequireContainer(); _imagePullPolicy = policy; return this; }
+
+    private void RequireContainer()
+    {
+        if (!_isContainer)
+            throw new InvalidOperationException($"Node '{_name}' is not a container node; use AddContainer(...).");
+    }
 
     /// <summary>Retry failed executions of this node up to <paramref name="maxRetries"/> times.</summary>
     public NodeBuilder WithRetries(int maxRetries) { _maxRetries = Math.Max(0, maxRetries); return this; }
@@ -129,6 +200,19 @@ public sealed class NodeBuilder
     {
         Name = _name,
         JobTypeName = _jobType,
+        Container = _isContainer
+            ? new ContainerSpec
+            {
+                Image = _image!,
+                Command = _command,
+                Args = _containerArgs,
+                Env = _containerEnv,
+                ServicePort = _servicePort,
+                ReadyTcpPort = _readyTcpPort,
+                ImagePullPolicy = _imagePullPolicy
+            }
+            : null,
+        IsService = _isService,
         Dependencies = _deps.Distinct().ToList(),
         Arguments = _args,
         InputBindings = _bindings,

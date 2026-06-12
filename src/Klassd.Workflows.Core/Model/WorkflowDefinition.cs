@@ -16,7 +16,19 @@ public sealed class WorkflowDefinition
 public sealed class WorkflowNode
 {
     public string Name { get; init; } = "";
+
+    /// <summary>The <c>IJob</c> type to run (worker image). Empty when <see cref="Container"/> is set.</summary>
     public string JobTypeName { get; init; } = "";
+
+    /// <summary>When set, this node runs an arbitrary container image instead of an <c>IJob</c>.</summary>
+    public ContainerSpec? Container { get; init; }
+
+    /// <summary>
+    /// A long-running "service" (daemon) node: it starts, becomes ready, and keeps running while
+    /// dependents use it; the engine tears it down once the rest of the run finishes. Readiness
+    /// (not exit) satisfies dependents. Mirrors an Argo <c>daemon</c> template.
+    /// </summary>
+    public bool IsService { get; init; }
 
     /// <summary>Node names that must succeed before this one starts (Argo <c>dependencies</c>).</summary>
     public IReadOnlyList<string> Dependencies { get; init; } = Array.Empty<string>();

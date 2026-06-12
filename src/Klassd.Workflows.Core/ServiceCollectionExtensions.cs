@@ -20,6 +20,7 @@ public static class ServiceCollectionExtensions
         // Default store; swap with builder.UseJobStore<T>() / UsePostgres() / UseMongo().
         services.TryAddSingleton<IJobStore, InMemoryJobStore>();
         services.AddSingleton<IJobCatalog, JobCatalog>();
+        services.AddSingleton<IContainerJobRegistry, ContainerJobRegistry>();
         services.AddSingleton<IJobScheduler, JobScheduler>();
         services.AddHostedService<RecurringScheduler>();
 

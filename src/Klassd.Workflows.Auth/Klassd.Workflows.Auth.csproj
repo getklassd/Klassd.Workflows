@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Klassd.Workflows.Auth</PackageId>
+    <Description>Authentication for the Klassd.Workflows dashboard: a Users admin (email + password local accounts) plus cookie sign-in, mirroring the Klassd CMS auth model but standalone. SSO is added separately via Klassd.Workflows.Auth.OpenIdConnect, which links to an existing user by email. Authentication is bypassed for loopback requests, so local development and `kubectl port-forward` need no login. AddKlassdWorkflowsAuth() + UseKlassdWorkflowsAuth().</Description>
+    <PackageTags>workflows;dashboard;auth;authentication;users;cookie;sso;dotnet</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,57 @@
+@page "/login"
+@layout BareLayout
+@attribute [AllowAnonymous]
+@using Klassd.Workflows.Auth
+@inject KlassdWorkflowsAuthOptions Options
+@inject ExternalLoginRegistry ExternalLogins
+
+<PageTitle>Sign in · Klassd Workflows</PageTitle>
+
+<div class="login-wrap">
+    <div class="login-card">
+        <h1>Klass<span>d</span> · Workflows</h1>
+        @if (Error)
+        {
+            <div class="alert alert-error" role="alert">@ErrorMessage</div>
+        }
+        @if (LocalLoginEnabled)
+        {
+            <form method="post" action="/auth/login">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" autocomplete="username" placeholder="you@example.com" />
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" autocomplete="current-password" placeholder="••••••••" />
+                </div>
+                <button class="btn btn-primary" type="submit" style="width:100%;justify-content:center;">Sign in</button>
+            </form>
+        }
+
+        @if (ExternalLogins.Providers.Count > 0)
+        {
+            @if (LocalLoginEnabled)
+            {
+                <div class="login-divider"><span>or</span></div>
+            }
+            @foreach (var provider in ExternalLogins.Providers)
+            {
+                <a class="btn btn-ghost login-sso" href="/auth/external/@Uri.EscapeDataString(provider.Scheme)">
+                    Sign in with @provider.DisplayName
+                </a>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")] public string? ErrorParam { get; set; }
+    private bool Error => !string.IsNullOrEmpty(ErrorParam);
+    private bool LocalLoginEnabled => Options.LocalLoginEnabled(ExternalLogins);
+    private string ErrorMessage => ErrorParam switch
+    {
+        "sso" => "Single sign-on failed or your account is not allowed.",
+        _ => "Invalid email or password.",
+    };
+}

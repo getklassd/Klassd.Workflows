@@ -29,6 +29,19 @@ public sealed class JobExecution
     /// <summary>Named outputs the job published via <c>IJobContext.SetOutput</c>.</summary>
     public Dictionary<string, string> Outputs { get; set; } = new();
 
+    /// <summary>
+    /// True once a long-running service job has signalled it's up (<c>IJobContext.SignalReady</c>).
+    /// The execution stays <see cref="JobStatus.Running"/>; the DAG uses this to unblock dependents.
+    /// </summary>
+    public bool Ready { get; set; }
+    public DateTimeOffset? ReadyAt { get; set; }
+
+    /// <summary>Long-running service (daemon) node — the executor keeps it running and the engine tears it down.</summary>
+    public bool IsService { get; set; }
+
+    /// <summary>When set, this execution runs an arbitrary container image instead of an <c>IJob</c> via the worker.</summary>
+    public ContainerSpec? Container { get; set; }
+
     // --- DAG linkage (null for standalone jobs) ---
     public string? WorkflowRunId { get; set; }
     public string? NodeName { get; set; }

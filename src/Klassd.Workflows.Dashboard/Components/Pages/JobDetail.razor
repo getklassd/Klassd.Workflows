@@ -1,5 +1,6 @@
 @page "/jobs/{Id}"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @implements IDisposable
 @inject IJobStore Store
 @inject IJobScheduler Scheduler

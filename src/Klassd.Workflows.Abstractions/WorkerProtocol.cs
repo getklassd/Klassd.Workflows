@@ -22,6 +22,13 @@ public static class WorkerProtocol
     public const string StatePrefix = "##STATE##";       // ##STATE## <Succeeded|Failed> <message>
     public const string OutputPrefix = "##OUTPUT##";     // ##OUTPUT## <key> <value>
 
+    /// <summary>
+    /// Emitted by a long-running "service" job once it's up and its outputs (e.g. address) are
+    /// published. Marks the execution ready so the DAG can unblock dependents while the job keeps
+    /// running (the engine tears it down when the rest of the run finishes). Format: <c>##READY##</c>.
+    /// </summary>
+    public const string ReadyPrefix = "##READY##";
+
     // Environment variables the executor sets on the worker container/process.
     public const string EnvJobId = "KLASSD_JOB_ID";
     public const string EnvJobName = "KLASSD_JOB_NAME";
@@ -30,4 +37,5 @@ public static class WorkerProtocol
     public const string EnvArtifactDir = "KLASSD_ARTIFACT_DIR";           // file provider directory (back-compat)
     public const string EnvArtifactProvider = "KLASSD_ARTIFACT_PROVIDER"; // provider name: file | gcs | s3 | custom
     public const string EnvArtifactSettings = "KLASSD_ARTIFACT_SETTINGS"; // JSON object of provider settings
+    public const string EnvPodIp = "KLASSD_POD_IP";       // the pod's own IP (downward API); empty when run locally
 }

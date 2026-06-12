@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
     <ProjectReference Include="..\Klassd.Workflows.Core\Klassd.Workflows.Core.csproj" />
+    <ProjectReference Include="..\Klassd.Workflows.Auth\Klassd.Workflows.Auth.csproj" />
   </ItemGroup>
 
 </Project>

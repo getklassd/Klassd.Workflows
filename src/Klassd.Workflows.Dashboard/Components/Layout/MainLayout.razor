@@ -5,6 +5,14 @@
         <div class="admin-brand">Klass<span>d</span> · Workflows</div>
         <div class="grow"></div>
         <div class="actions admin-topbar-actions">
+            <AuthorizeView>
+                <Authorized>
+                    <span class="muted" style="margin-right:4px;">@context.User.Identity?.Name</span>
+                    <form method="post" action="/auth/logout" style="display:inline;">
+                        <button class="btn btn-ghost btn-sm" type="submit">Sign out</button>
+                    </form>
+                </Authorized>
+            </AuthorizeView>
             <ThemeToggle />
         </div>
     </header>

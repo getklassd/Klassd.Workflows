@@ -1,0 +1,7 @@
+@inject NavigationManager Nav
+
+@code {
+    // Rendered by AuthorizeRouteView when the visitor isn't authenticated. During static SSR this
+    // issues an HTTP redirect to the login page; locally the loopback bypass means it never renders.
+    protected override void OnInitialized() => Nav.NavigateTo("login", forceLoad: false);
+}

@@ -10,6 +10,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Klassd.Workflows.Dashboard\Klassd.Workflows.Dashboard.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Auth\Klassd.Workflows.Auth.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Auth.OpenIdConnect\Klassd.Workflows.Auth.OpenIdConnect.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Storage.Sqlite\Klassd.Workflows.Storage.Sqlite.csproj" />
     <ProjectReference Include="..\..\src\Klassd.Workflows.Kubernetes\Klassd.Workflows.Kubernetes.csproj" />
     <ProjectReference Include="..\..\src\Klassd.Workflows.Storage.Postgres\Klassd.Workflows.Storage.Postgres.csproj" />
     <ProjectReference Include="..\..\src\Klassd.Workflows.Storage.MongoDb\Klassd.Workflows.Storage.MongoDb.csproj" />

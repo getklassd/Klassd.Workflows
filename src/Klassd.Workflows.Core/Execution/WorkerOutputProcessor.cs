@@ -66,6 +66,22 @@ public static class WorkerOutputProcessor
             return;
         }
 
+        if (line.StartsWith(WorkerProtocol.ReadyPrefix, StringComparison.Ordinal))
+        {
+            if (exec.Status is JobStatus.Starting or JobStatus.Enqueued)
+            {
+                exec.Status = JobStatus.Running;
+                exec.StartedAt ??= DateTimeOffset.UtcNow;
+            }
+            if (!exec.Ready)
+            {
+                exec.Ready = true;
+                exec.ReadyAt = DateTimeOffset.UtcNow;
+            }
+            await store.UpdateAsync(exec);
+            return;
+        }
+
         if (line.StartsWith(WorkerProtocol.StatePrefix, StringComparison.Ordinal))
         {
             var rest = line[WorkerProtocol.StatePrefix.Length..].Trim();

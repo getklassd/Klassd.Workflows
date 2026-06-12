@@ -50,6 +50,31 @@ public sealed class JobScheduler : IJobScheduler
         where TJob : IJob =>
         AddOrUpdateRecurring(id, typeof(TJob).FullName!, cron, args);
 
+    public async Task<string> EnqueueContainerAsync(string name, ContainerSpec container, Dictionary<string, string>? args = null)
+    {
+        var descriptor = new JobDescriptor(name, "", args ?? new()) { Container = container };
+        var exec = await _store.CreateAsync(descriptor, _executor.Name);
+        exec.Container = container; // stores don't copy the container from the descriptor
+        await _store.UpdateAsync(exec);
+        _logger.LogInformation("Enqueued container job {Job} ({Image}) as {Id}", name, container.Image, exec.Id);
+        await _executor.StartAsync(exec);
+        return exec.Id;
+    }
+
+    public void AddOrUpdateRecurringContainer(string id, string name, ContainerSpec container, string cron, Dictionary<string, string>? args = null)
+    {
+        _store.UpsertRecurringAsync(new RecurringJob
+        {
+            Id = id,
+            Kind = RecurringKind.Container,
+            JobTypeName = name, // display name for container kind
+            Container = container,
+            Cron = cron,
+            Arguments = args ?? new()
+        }).GetAwaiter().GetResult();
+        _logger.LogInformation("Registered recurring container job {Id} ({Cron})", id, cron);
+    }
+
     public async Task StopAsync(string executionId)
     {
         var exec = await _store.GetAsync(executionId);

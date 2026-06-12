@@ -17,9 +17,13 @@
     <!-- Scheduling -->
     <PackageVersion Include="Cronos" Version="0.13.0" />
 
+    <!-- Auth (OIDC SSO for the dashboard) -->
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.9" />
+
     <!-- Durable job stores -->
     <PackageVersion Include="MongoDB.Driver" Version="3.9.0" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.8" />
 
     <!-- Kubernetes executor -->
     <PackageVersion Include="KubernetesClient" Version="19.0.2" />

@@ -18,6 +18,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Klassd.Workflows.Core\Klassd.Workflows.Core.csproj" />
     <ProjectReference Include="..\..\src\Klassd.Workflows.Kubernetes\Klassd.Workflows.Kubernetes.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Auth\Klassd.Workflows.Auth.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Storage.Sqlite\Klassd.Workflows.Storage.Sqlite.csproj" />
     <!-- For typeof(HelloWorldJob).FullName — the job itself runs inside the worker image. -->
     <ProjectReference Include="..\..\samples\Klassd.Workflows.SampleJobs\Klassd.Workflows.SampleJobs.csproj" />
   </ItemGroup>

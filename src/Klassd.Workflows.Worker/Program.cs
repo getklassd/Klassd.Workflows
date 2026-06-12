@@ -69,7 +69,11 @@ if (!artifactSettings.ContainsKey("dir") &&
 
 var artifacts = ArtifactStoreResolver.Resolve(artifactProvider, artifactSettings);
 
-var context = new JobContext(jobId, jobName, jobArgs, cts.Token, stdout, artifacts);
+// The pod's own IP (downward API in K8s); empty locally, where 127.0.0.1 is the right address.
+var podIp = Environment.GetEnvironmentVariable(WorkerProtocol.EnvPodIp);
+if (string.IsNullOrWhiteSpace(podIp)) podIp = "127.0.0.1";
+
+var context = new JobContext(jobId, jobName, jobArgs, cts.Token, stdout, artifacts, podIp);
 
 try
 {

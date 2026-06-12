@@ -14,6 +14,10 @@ public sealed class IntegrationJob : IJob
         var market = context.Arguments.GetValueOrDefault("market", "?");
         context.Log($"Integrating products for market {market}");
 
+        // Address forwarded from the long-running "sql-proxy" service node (bound via BindInput).
+        if (context.Arguments.GetValueOrDefault("db_host") is { Length: > 0 } dbHost)
+            context.Log($"Connecting through the SQL proxy at {dbHost}");
+
         for (var i = 1; i <= 4; i++)
         {
             context.CancellationToken.ThrowIfCancellationRequested();

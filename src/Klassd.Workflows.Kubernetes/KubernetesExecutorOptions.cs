@@ -26,6 +26,15 @@ public sealed class KubernetesExecutorOptions
     /// <summary>Seconds a finished Job lingers before Kubernetes garbage-collects it.</summary>
     public int TtlSecondsAfterFinished { get; set; } = 300;
 
+    /// <summary>
+    /// Hard ceiling (<c>activeDeadlineSeconds</c>) applied to long-running service/daemon Jobs only.
+    /// The orchestrator normally tears a service down when the run ends; this is the safety backstop
+    /// so an orphaned daemon (e.g. the scheduler died mid-run) is still reaped by Kubernetes after at
+    /// most this long. Set null to disable. Preferred over an owner reference, which would kill all
+    /// running daemons on every scheduler rolling-restart. Default 6 hours.
+    /// </summary>
+    public int? ServiceActiveDeadlineSeconds { get; set; } = 21_600;
+
     /// <summary>Optional service account for the worker pod.</summary>
     public string? ServiceAccountName { get; set; }
 

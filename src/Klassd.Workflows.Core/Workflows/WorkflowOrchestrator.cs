@@ -38,7 +38,26 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _store.ExecutionChanged += OnExecutionChanged;
+        // Re-drive any runs that were in flight when we last shut down. Teardown and node
+        // scheduling are event-driven in memory, so without this a restart could leave a run's
+        // work finished but its service (daemon) nodes never torn down. Idempotent and best-effort.
+        _ = Task.Run(ReconcileRunningAsync, CancellationToken.None);
         return Task.CompletedTask;
+    }
+
+    /// <summary>Re-evaluates every non-terminal run from the store (recovers orchestration after a restart).</summary>
+    private async Task ReconcileRunningAsync()
+    {
+        try
+        {
+            var runs = await _store.ListWorkflowRunsAsync(limit: 10_000);
+            foreach (var run in runs.Where(r => !r.IsTerminal))
+            {
+                try { await EvaluateAsync(run); }
+                catch (Exception ex) { _logger.LogError(ex, "Reconcile of run {Run} failed", run.Id); }
+            }
+        }
+        catch (Exception ex) { _logger.LogError(ex, "Workflow reconcile on startup failed"); }
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
@@ -60,9 +79,10 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
             run.Nodes.Add(new NodeRun
             {
                 Name = node.Name,
-                JobTypeName = node.JobTypeName,
+                JobTypeName = node.Container is { } c ? $"container: {c.Image}" : node.JobTypeName,
                 Dependencies = node.Dependencies.ToList(),
-                IsFanOut = node.FanOut is not null
+                IsFanOut = node.FanOut is not null,
+                IsService = node.IsService
             });
         }
 
@@ -100,9 +120,11 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
 
             var changed = false;
 
-            // 1. Settle running nodes: retry failed tasks, or mark the node done.
+            // 1. Settle running nodes: services detect readiness/failure; others retry or finish.
             foreach (var node in run.Nodes.Where(n => n.Status == NodeRunStatus.Running))
-                changed |= await SettleNodeAsync(node, def);
+                changed |= node.IsService
+                    ? await SettleServiceNodeAsync(node)
+                    : await SettleNodeAsync(node, def);
 
             // 2. Omit/skip/start pending nodes.
             foreach (var node in run.Nodes.Where(n => n.Status == NodeRunStatus.Pending))
@@ -131,10 +153,27 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
                 changed = true;
             }
 
-            // 3. Recompute the run's overall status.
+            // 3. Tear down still-running service nodes once they've served their purpose. Normally
+            //    that's "all non-service work is terminal"; for a workflow made only of services it's
+            //    "every service is up (ready) or already finished". Services never finish on their own.
+            var workNodes = run.Nodes.Where(n => !n.IsService).ToList();
+            var serviceNodes = run.Nodes.Where(n => n.IsService).ToList();
+            var servicesDone = workNodes.Count > 0
+                ? workNodes.All(n => n.IsTerminal)
+                : serviceNodes.Count > 0 && serviceNodes.All(n => n.IsTerminal || n.Ready);
+            if (servicesDone)
+            {
+                foreach (var svc in serviceNodes.Where(n => n.Status == NodeRunStatus.Running))
+                {
+                    await TeardownServiceAsync(svc);
+                    changed = true;
+                }
+            }
+
+            // 4. Recompute the run's overall status (service teardown doesn't fail a run).
             if (run.Nodes.All(n => n.IsTerminal) && !run.IsTerminal)
             {
-                run.Status = run.Nodes.Any(n => n.Status is NodeRunStatus.Failed or NodeRunStatus.Skipped)
+                run.Status = workNodes.Any(n => n.Status is NodeRunStatus.Failed or NodeRunStatus.Skipped)
                     ? WorkflowRunStatus.Failed
                     : WorkflowRunStatus.Succeeded;
                 run.FinishedAt = DateTimeOffset.UtcNow;
@@ -152,7 +191,8 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
     /// <summary>Advances a running node: retries failed attempts, settles to Succeeded/Failed when stable.</summary>
     private async Task<bool> SettleNodeAsync(NodeRun node, WorkflowDefinition def)
     {
-        var maxAttempts = def.Node(node.Name)!.MaxAttempts;
+        var defNode = def.Node(node.Name)!;
+        var maxAttempts = defNode.MaxAttempts;
         var changed = false;
         var anyInFlight = false;
 
@@ -167,7 +207,7 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
             {
                 _logger.LogInformation("Run {Run} node {Node}: retrying (attempt {N}/{Max})",
                     current.WorkflowRunId, node.Name, task.Attempts.Count + 1, maxAttempts);
-                await StartAttemptAsync(current.WorkflowRunId!, node, task);
+                await StartAttemptAsync(current.WorkflowRunId!, node, task, defNode);
                 anyInFlight = true;
                 changed = true;
             }
@@ -185,6 +225,47 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
         }
         node.Status = allSucceeded ? NodeRunStatus.Succeeded : NodeRunStatus.Failed;
         return true;
+    }
+
+    /// <summary>
+    /// Settles a long-running service node: flips <see cref="NodeRun.Ready"/> once its execution
+    /// signals ready (which unblocks dependents), or fails the node if the service died before
+    /// teardown. It never finishes on its own — <see cref="TeardownServiceAsync"/> ends it.
+    /// </summary>
+    private async Task<bool> SettleServiceNodeAsync(NodeRun node)
+    {
+        var task = node.Tasks.FirstOrDefault();
+        var exec = task?.Current is null ? null : await _store.GetAsync(task.Current);
+        if (exec is null) return false;
+
+        if (exec.IsTerminal)
+        {
+            // The service exited before we tore it down: a crash fails the node; a clean exit is benign.
+            node.Status = exec.Status == JobStatus.Succeeded ? NodeRunStatus.Succeeded : NodeRunStatus.Failed;
+            return true;
+        }
+
+        if (exec.Ready && !node.Ready)
+        {
+            node.Ready = true;
+            _logger.LogInformation("Run {Run} node {Node}: service ready", exec.WorkflowRunId, node.Name);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>Stops a running service node's execution and marks the node done (it served its purpose).</summary>
+    private async Task TeardownServiceAsync(NodeRun node)
+    {
+        var task = node.Tasks.FirstOrDefault();
+        var exec = task?.Current is null ? null : await _store.GetAsync(task.Current);
+        if (exec is not null && !exec.IsTerminal)
+        {
+            try { await _executor.StopAsync(exec); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed stopping service node {Node}", node.Name); }
+        }
+        node.Status = NodeRunStatus.Succeeded;
+        _logger.LogInformation("Run {Run} node {Node}: service torn down", exec?.WorkflowRunId, node.Name);
     }
 
     private async Task StartNodeAsync(WorkflowRun run, NodeRun node, WorkflowNode defNode)
@@ -217,21 +298,27 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
         }
 
         foreach (var task in node.Tasks)
-            await StartAttemptAsync(run.Id, node, task);
+            await StartAttemptAsync(run.Id, node, task, defNode);
 
         node.Status = NodeRunStatus.Running;
     }
 
-    private async Task StartAttemptAsync(string runId, NodeRun node, NodeTask task)
+    private async Task StartAttemptAsync(string runId, NodeRun node, NodeTask task, WorkflowNode defNode)
     {
         var args = new Dictionary<string, string>(task.Arguments)
         {
             ["__attempt"] = task.Attempts.Count.ToString() // 0-based attempt index
         };
-        var descriptor = new JobDescriptor(node.Name, node.JobTypeName, args);
+        var descriptor = new JobDescriptor(node.Name, defNode.JobTypeName, args)
+        {
+            Container = defNode.Container,
+            IsService = defNode.IsService
+        };
         var exec = await _store.CreateAsync(descriptor, _executor.Name);
         exec.WorkflowRunId = runId;
         exec.NodeName = node.Name;
+        exec.Container = defNode.Container;
+        exec.IsService = defNode.IsService;
         await _store.UpdateAsync(exec);
         task.Attempts.Add(exec.Id);
         await _executor.StartAsync(exec);

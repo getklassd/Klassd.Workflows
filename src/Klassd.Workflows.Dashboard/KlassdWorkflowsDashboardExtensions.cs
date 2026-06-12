@@ -34,7 +34,9 @@ public static class KlassdWorkflowsDashboardExtensions
     /// <summary>Maps the dashboard's static assets and Razor component endpoints.</summary>
     public static IEndpointRouteBuilder MapKlassdWorkflowsDashboard(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapStaticAssets();
+        // Static assets stay anonymous so CSS/JS load on the login page (before sign-in).
+        // No-op when no authorization is configured.
+        endpoints.MapStaticAssets().AllowAnonymous();
         endpoints.MapRazorComponents<App>()
             .AddInteractiveServerRenderMode();
         return endpoints;

@@ -1,0 +1,165 @@
+@page "/users"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using System.Security.Claims
+@using Klassd.Workflows.Abstractions
+@using Klassd.Workflows.Auth
+@inject WorkflowsUserService UserSvc
+
+<PageTitle>Users</PageTitle>
+
+<div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
+    <h1 style="margin:0;">Users</h1>
+    <div class="grow"></div>
+    <button class="btn btn-primary btn-sm" @onclick="() => _creating = !_creating">
+        @(_creating ? "Cancel" : "+ New user")
+    </button>
+</div>
+<p class="muted" style="margin-bottom:18px;">Dashboard accounts. Local users sign in with email + password;
+   SSO users are linked or created automatically on first sign-in.</p>
+
+@if (_message is not null)
+{
+    <div class="alert @(_isError ? "alert-error" : "alert-success")" style="margin-bottom:16px;">@_message</div>
+}
+
+@if (_creating)
+{
+    <div class="card" style="margin-bottom:18px; padding:16px;">
+        <h2 style="margin-top:0;">New user</h2>
+        <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Email</label>
+                <input class="input" type="email" @bind="_newEmail" placeholder="jane@example.com" />
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Password</label>
+                <input class="input" type="password" @bind="_newPassword" placeholder="••••••••" />
+            </div>
+            <button class="btn btn-primary" @onclick="CreateAsync">Create</button>
+        </div>
+    </div>
+}
+
+@if (_users is null)
+{
+    <p class="muted">Loading…</p>
+}
+else if (_users.Count == 0)
+{
+    <p class="muted">No users yet.</p>
+}
+else
+{
+    <div class="card" style="padding:0;">
+        <table class="table">
+            <thead>
+                <tr><th>Email</th><th>Provider</th><th>Status</th><th style="text-align:right;">Actions</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var u in _users)
+                {
+                    <tr>
+                        <td>
+                            @u.Email
+                            @if (u.Id == _currentUserId)
+                            {
+                                <span class="badge badge-success" style="margin-left:6px;">you</span>
+                            }
+                        </td>
+                        <td>
+                            <span class="badge @(u.Provider == "local" ? "badge-ghost" : "badge-info")">@u.Provider</span>
+                        </td>
+                        <td>@(u.Disabled ? "Disabled" : "Active")</td>
+                        <td style="text-align:right; white-space:nowrap;">
+                            <div style="display:inline-flex; gap:6px; align-items:center;">
+                                <input class="input input-sm" type="password" style="width:150px;"
+                                       placeholder="New password" @bind="_resetInputs[u.Id]" />
+                                <button class="btn btn-ghost btn-sm" @onclick="() => ResetPasswordAsync(u)">Set</button>
+                                @if (u.Id != _currentUserId)
+                                {
+                                    <button class="btn btn-ghost btn-sm" @onclick="() => ToggleDisabledAsync(u)">
+                                        @(u.Disabled ? "Enable" : "Disable")
+                                    </button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private IReadOnlyList<WorkflowsUser>? _users;
+    private string? _currentUserId;
+    private bool _creating;
+    private string _newEmail = "";
+    private string _newPassword = "";
+    private readonly Dictionary<string, string> _resetInputs = new();
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is not null)
+        {
+            var auth = await AuthState;
+            _currentUserId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        }
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _users = await UserSvc.GetAllAsync();
+        foreach (var u in _users)
+            _resetInputs.TryAdd(u.Id, "");
+    }
+
+    private void Notify(string message, bool error = false)
+    {
+        _message = message;
+        _isError = error;
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            var created = await UserSvc.CreateAsync(_newEmail, _newPassword);
+            _newEmail = _newPassword = "";
+            _creating = false;
+            await ReloadAsync();
+            Notify($"User '{created.Email}' created.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            Notify(ex.Message, error: true);
+        }
+    }
+
+    private async Task ToggleDisabledAsync(WorkflowsUser user)
+    {
+        if (user.Id == _currentUserId) return;
+        await UserSvc.SetDisabledAsync(user.Id, !user.Disabled);
+        await ReloadAsync();
+        Notify(user.Disabled ? $"'{user.Email}' enabled." : $"'{user.Email}' disabled.");
+    }
+
+    private async Task ResetPasswordAsync(WorkflowsUser user)
+    {
+        var pwd = _resetInputs.GetValueOrDefault(user.Id, "");
+        if (string.IsNullOrEmpty(pwd))
+        {
+            Notify("Enter a new password first.", error: true);
+            return;
+        }
+        await UserSvc.ResetPasswordAsync(user.Id, pwd);
+        _resetInputs[user.Id] = "";
+        Notify($"Password updated for '{user.Email}'.");
+    }
+}

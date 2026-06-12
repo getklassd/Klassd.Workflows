@@ -12,6 +12,15 @@ public interface IJobScheduler
     void AddOrUpdateRecurring(string id, string jobTypeName, string cron, Dictionary<string, string>? args = null);
     void AddOrUpdateRecurring<TJob>(string id, string cron, Dictionary<string, string>? args = null) where TJob : IJob;
 
+    /// <summary>
+    /// Enqueue a standalone job that runs an arbitrary container image (not an <c>IJob</c>) — e.g. a
+    /// legacy Go tool — to completion. <paramref name="name"/> is the display name. Returns the execution id.
+    /// </summary>
+    Task<string> EnqueueContainerAsync(string name, ContainerSpec container, Dictionary<string, string>? args = null);
+
+    /// <summary>Schedule a container-backed standalone job on a cron expression.</summary>
+    void AddOrUpdateRecurringContainer(string id, string name, ContainerSpec container, string cron, Dictionary<string, string>? args = null);
+
     Task StopAsync(string executionId);
 
     /// <summary>Start a run of a registered workflow DAG. Returns the run id.</summary>

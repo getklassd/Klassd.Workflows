@@ -12,7 +12,8 @@ internal sealed class JobContext(
     IReadOnlyDictionary<string, string> args,
     CancellationToken cancellationToken,
     TextWriter @out,
-    IArtifactStore artifacts)
+    IArtifactStore artifacts,
+    string podIp)
     : IJobContext
 {
     public string JobId { get; } = jobId;
@@ -20,6 +21,7 @@ internal sealed class JobContext(
     public IReadOnlyDictionary<string, string> Arguments { get; } = args;
     public CancellationToken CancellationToken { get; } = cancellationToken;
     public IArtifactStore Artifacts { get; } = artifacts;
+    public string PodIp { get; } = podIp;
 
     public void Log(string message) =>
         @out.WriteLine($"{WorkerProtocol.LogPrefix} {message}");
@@ -58,4 +60,6 @@ internal sealed class JobContext(
     public void SetOutput(string key, string value) =>
         // value may contain spaces / JSON; only the first space delimits the key.
         @out.WriteLine($"{WorkerProtocol.OutputPrefix} {key} {value}");
+
+    public void SignalReady() => @out.WriteLine(WorkerProtocol.ReadyPrefix);
 }

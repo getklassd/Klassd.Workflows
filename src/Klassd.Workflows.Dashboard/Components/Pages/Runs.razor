@@ -1,6 +1,7 @@
 @page "/runs"
 @page "/runs/{Status}"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @implements IDisposable
 @inject IJobStore Store
 @inject IJobScheduler Scheduler

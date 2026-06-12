@@ -58,9 +58,13 @@ public sealed class RecurringScheduler : BackgroundService
             if (next is null || next > now.UtcDateTime) continue;
 
             job.LastRun = now;
-            job.LastExecutionId = job.Kind == RecurringKind.Workflow
-                ? await _scheduler.EnqueueWorkflowAsync(job.WorkflowName)
-                : await _scheduler.EnqueueAsync(job.JobTypeName, job.Arguments);
+            job.LastExecutionId = job.Kind switch
+            {
+                RecurringKind.Workflow => await _scheduler.EnqueueWorkflowAsync(job.WorkflowName),
+                RecurringKind.Container when job.Container is not null =>
+                    await _scheduler.EnqueueContainerAsync(job.JobTypeName, job.Container, job.Arguments),
+                _ => await _scheduler.EnqueueAsync(job.JobTypeName, job.Arguments)
+            };
             await _store.UpsertRecurringAsync(job);
         }
     }

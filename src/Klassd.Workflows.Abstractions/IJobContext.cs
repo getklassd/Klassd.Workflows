@@ -18,6 +18,13 @@ public interface IJobContext
     /// <summary>Cancellation token, signalled when the job is stopped from the UI.</summary>
     CancellationToken CancellationToken { get; }
 
+    /// <summary>
+    /// This pod's own IP address (Kubernetes downward API), or <c>"127.0.0.1"</c> when run locally.
+    /// A long-running service job advertises its address from this, e.g.
+    /// <c>SetOutput("address", $"{PodIp}:5432")</c>, so dependent nodes can connect.
+    /// </summary>
+    string PodIp { get; }
+
     /// <summary>Out-of-band storage for large payloads passed between nodes.</summary>
     IArtifactStore Artifacts { get; }
 
@@ -42,4 +49,13 @@ public interface IJobContext
     /// (mirrors Argo's <c>outputs.parameters</c> + <c>withParam</c>).
     /// </summary>
     void SetOutput(string key, string value);
+
+    /// <summary>
+    /// Signal that a long-running "service" node is up and its outputs are published. The DAG
+    /// unblocks dependents while this job keeps running; the engine stops it (cancels this
+    /// <see cref="CancellationToken"/> / deletes the pod) once the rest of the run finishes. A
+    /// service job should publish its outputs first, call this, then await <see cref="CancellationToken"/>
+    /// (treating cancellation as a normal shutdown). No-op for ordinary jobs.
+    /// </summary>
+    void SignalReady();
 }

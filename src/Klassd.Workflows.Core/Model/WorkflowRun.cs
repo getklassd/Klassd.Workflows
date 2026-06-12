@@ -36,6 +36,12 @@ public sealed class NodeRun
     public IReadOnlyList<string> Dependencies { get; init; } = Array.Empty<string>();
     public bool IsFanOut { get; init; }
 
+    /// <summary>Long-running service (daemon) node: ready (not exit) satisfies dependents; torn down at the end.</summary>
+    public bool IsService { get; init; }
+
+    /// <summary>For a service node: true once its execution signalled ready / its pod became ready.</summary>
+    public bool Ready { get; set; }
+
     public NodeRunStatus Status { get; set; } = NodeRunStatus.Pending;
 
     public List<NodeTask> Tasks { get; init; } = new();
@@ -47,9 +53,13 @@ public sealed class NodeRun
         Status is NodeRunStatus.Succeeded or NodeRunStatus.Failed
             or NodeRunStatus.Skipped or NodeRunStatus.Omitted;
 
-    /// <summary>True once this node satisfies a dependency (succeeded or benignly omitted).</summary>
+    /// <summary>
+    /// True once this node satisfies a dependency: succeeded, benignly omitted, or — for a service
+    /// node — running and ready (dependents start while the service stays up).
+    /// </summary>
     public bool SatisfiesDependents =>
-        Status is NodeRunStatus.Succeeded or NodeRunStatus.Omitted;
+        Status is NodeRunStatus.Succeeded or NodeRunStatus.Omitted
+            || (IsService && Status == NodeRunStatus.Running && Ready);
 }
 
 /// <summary>One unit of work within a node (a fan-out item, or the sole task), with its retry attempts.</summary>
