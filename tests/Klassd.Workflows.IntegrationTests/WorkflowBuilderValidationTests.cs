@@ -1,3 +1,4 @@
+using Klassd.Workflows.Core.Model;
 using Klassd.Workflows.Core.Workflows;
 
 namespace Klassd.Workflows.IntegrationTests;
@@ -47,6 +48,106 @@ public class WorkflowBuilderValidationTests
         await Assert.That(node.Container.ServicePort).IsEqualTo(5432);
         await Assert.That(node.Container.ReadyTcpPort).IsEqualTo(5432);
         await Assert.That(node.JobTypeName).IsEqualTo("");
+    }
+
+    [Test]
+    public async Task Init_containers_attach_to_both_job_and_container_nodes()
+    {
+        var def = new WorkflowBuilder("ok")
+            .Add("cleanup", "Cleanup", n => n
+                .WithInitContainer("migrate", "olympus/migrate:1", "--db", "primary"))
+            .AddContainer("proxy", "cloud-sql-proxy:2.11", c => c
+                .ServicePort(5432)
+                .WithInitContainer(new InitContainerSpec { Name = "warm", Image = "busybox:1.36" }))
+            .Build();
+
+        var job = def.Node("cleanup")!;
+        await Assert.That(job.InitContainers.Count).IsEqualTo(1);
+        await Assert.That(job.InitContainers[0].Name).IsEqualTo("migrate");
+        await Assert.That(job.InitContainers[0].Image).IsEqualTo("olympus/migrate:1");
+        await Assert.That(job.InitContainers[0].Args).IsEquivalentTo(new[] { "--db", "primary" });
+
+        var proxy = def.Node("proxy")!;
+        await Assert.That(proxy.InitContainers.Single().Name).IsEqualTo("warm");
+    }
+
+    [Test]
+    public async Task Volumes_and_mounts_attach_to_the_node()
+    {
+        var def = new WorkflowBuilder("ok")
+            .Add("cleanup", "Cleanup", n => n
+                .WithEmptyDir("scratch")
+                .WithVolume(new VolumeSpec { Name = "secrets", Kind = VolumeKind.Secret, Source = "db-creds" })
+                .WithVolumeMount("scratch", "/scratch")
+                .WithVolumeMount(new VolumeMountSpec { Name = "secrets", MountPath = "/secrets", ReadOnly = true }))
+            .Build();
+
+        var node = def.Node("cleanup")!;
+        await Assert.That(node.Volumes.Count).IsEqualTo(2);
+        await Assert.That(node.Volumes[0].Name).IsEqualTo("scratch");
+        await Assert.That(node.Volumes[0].Kind).IsEqualTo(VolumeKind.EmptyDir);
+        await Assert.That(node.Volumes[1].Kind).IsEqualTo(VolumeKind.Secret);
+        await Assert.That(node.Volumes[1].Source).IsEqualTo("db-creds");
+
+        await Assert.That(node.VolumeMounts.Count).IsEqualTo(2);
+        await Assert.That(node.VolumeMounts[0].MountPath).IsEqualTo("/scratch");
+        await Assert.That(node.VolumeMounts[1].Name).IsEqualTo("secrets");
+        await Assert.That(node.VolumeMounts[1].ReadOnly).IsTrue();
+    }
+
+    [Test]
+    public async Task Security_contexts_attach_to_the_node()
+    {
+        var def = new WorkflowBuilder("ok")
+            .Add("cleanup", "Cleanup", n => n
+                .WithPodSecurityContext(new PodSecurityContextSpec { FsGroup = 2000, RunAsNonRoot = true })
+                .WithSecurityContext(new SecurityContextSpec
+                {
+                    RunAsUser = 1000,
+                    ReadOnlyRootFilesystem = true,
+                    DropCapabilities = new[] { "ALL" },
+                }))
+            .Build();
+
+        var node = def.Node("cleanup")!;
+        await Assert.That(node.PodSecurityContext!.FsGroup).IsEqualTo(2000L);
+        await Assert.That(node.PodSecurityContext.RunAsNonRoot).IsEqualTo(true);
+        await Assert.That(node.SecurityContext!.RunAsUser).IsEqualTo(1000L);
+        await Assert.That(node.SecurityContext.ReadOnlyRootFilesystem).IsEqualTo(true);
+        await Assert.That(node.SecurityContext.DropCapabilities).IsEquivalentTo(new[] { "ALL" });
+    }
+
+    [Test]
+    public async Task Resources_envfrom_and_scheduling_attach_to_the_node()
+    {
+        var def = new WorkflowBuilder("ok")
+            .Add("cleanup", "Cleanup", n => n
+                .WithEnvFromConfigMap("app-config")
+                .WithEnvFromSecret("db-creds", optional: true)
+                .WithNodeSelector("pool", "batch")
+                .WithToleration(new TolerationSpec { Key = "dedicated", Operator = "Equal", Value = "batch", Effect = "NoSchedule" })
+                .WithAffinity(new AffinitySpec
+                {
+                    NodeAffinity = new NodeAffinitySpec
+                    {
+                        Required = new[]
+                        {
+                            new NodeSelectorTermSpec
+                            {
+                                MatchExpressions = new[] { new NodeSelectorRequirementSpec { Key = "disktype", Operator = "In", Values = new[] { "ssd" } } },
+                            },
+                        },
+                    },
+                }))
+            .Build();
+
+        var node = def.Node("cleanup")!;
+        await Assert.That(node.EnvFrom.Count).IsEqualTo(2);
+        await Assert.That(node.EnvFrom[0].Kind).IsEqualTo(EnvFromKind.ConfigMap);
+        await Assert.That(node.EnvFrom[1].Optional).IsTrue();
+        await Assert.That(node.NodeSelector["pool"]).IsEqualTo("batch");
+        await Assert.That(node.Tolerations.Single().Effect).IsEqualTo("NoSchedule");
+        await Assert.That(node.Affinity!.NodeAffinity!.Required[0].MatchExpressions[0].Values).IsEquivalentTo(new[] { "ssd" });
     }
 
     [Test]

@@ -1,7 +1,9 @@
 using Klassd.Workflows.Core;
 using Klassd.Workflows.Core.Abstractions;
+using Klassd.Workflows.Core.Model;
 using Klassd.Workflows.Core.Workflows;
 using Klassd.Workflows.Kubernetes;
+using Klassd.Workflows.SampleJobs;
 using Klassd.Workflows.SampleJobs.Dag;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -16,6 +18,7 @@ namespace Klassd.Workflows.IntegrationTests;
 internal static class TestHost
 {
     public const string SampleWorkflow = "catalog-integration";
+    public const string ContainerServiceWorkflow = "container-service";
 
     private static KubernetesCluster? _cluster;
     private static MinioStore? _minio;
@@ -24,6 +27,10 @@ internal static class TestHost
 
     public static IJobScheduler Scheduler => _provider!.GetRequiredService<IJobScheduler>();
     public static IJobStore Store => _provider!.GetRequiredService<IJobStore>();
+
+    /// <summary>Kubeconfig for the shared K3s cluster — lets tests create fixtures (e.g. a ConfigMap) directly.</summary>
+    public static string KubeConfigPath => _cluster!.KubeConfigPath;
+    public const string Namespace = "default";
 
     public static async Task InitializeAsync(CancellationToken ct = default)
     {
@@ -38,6 +45,23 @@ internal static class TestHost
             o.WorkerImage = KubernetesCluster.WorkerImage;
             o.ImagePullPolicy = "Never";       // image is side-loaded into the node
             o.Namespace = "default";
+
+            // Executor-wide init container stamped onto every pod (worker, container, service). A
+            // no-op busybox that just has to succeed — so the whole suite passing proves executor-wide
+            // init containers are accepted and don't break any pod type.
+            o.InitContainers.Add(new InitContainerSpec
+            {
+                Name = "preflight",
+                Image = KubernetesCluster.BusyboxImage,
+                Command = new[] { "sh", "-c" },
+                Args = new[] { "echo preflight-ok" },
+                ImagePullPolicy = "IfNotPresent",   // pulled by the cluster, not side-loaded
+            });
+
+            // Executor-wide pod security context on every pod — a safe default (RuntimeDefault
+            // seccomp doesn't break the worker/busybox), so the whole suite passing proves the
+            // global path works on all pod types.
+            o.PodSecurityContext = new PodSecurityContextSpec { SeccompProfileType = "RuntimeDefault" };
             o.KubeConfigPath = _cluster.KubeConfigPath;
             o.InCluster = false;
             o.TtlSecondsAfterFinished = 60;
@@ -55,7 +79,9 @@ internal static class TestHost
         });
 
         _provider = services.BuildServiceProvider();
-        RegisterSampleWorkflow(_provider.GetRequiredService<IWorkflowRegistry>());
+        var registry = _provider.GetRequiredService<IWorkflowRegistry>();
+        RegisterSampleWorkflow(registry);
+        RegisterContainerServiceWorkflow(registry);
 
         foreach (var hs in _provider.GetServices<IHostedService>())
         {
@@ -95,5 +121,21 @@ internal static class TestHost
             .Add<RollbackJob>("rollback", n => n
                 .DependsOn("data-proxy")
                 .When("data-proxy", "status", "failed"))
+            .Build());
+
+    // An arbitrary-image (nginx) node run as a long-running SERVICE: the executor publishes its
+    // address, readiness is gated on the TCP probe, a dependent IJob binds the forwarded address,
+    // and the orchestrator tears the service down once the work node finishes. Exercises the real
+    // K8s container-node path (BuildContainerJob + readinessProbe + FollowContainerAsync) end-to-end.
+    private static void RegisterContainerServiceWorkflow(IWorkflowRegistry registry) =>
+        registry.Register(new WorkflowBuilder(ContainerServiceWorkflow)
+            .AddContainer("web", KubernetesCluster.NginxImage, c => c
+                .AsService()
+                .ServicePort(80)
+                .ReadyOnTcp(80)
+                .WithImagePullPolicy("IfNotPresent"))   // pulled by the cluster, override the host's global Never
+            .Add<HelloWorldJob>("consumer", n => n
+                .DependsOn("web")
+                .BindInput("name", "web", "address"))
             .Build());
 }
