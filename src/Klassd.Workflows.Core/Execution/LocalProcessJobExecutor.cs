@@ -53,6 +53,13 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
 
     public Task StartAsync(JobExecution exec, CancellationToken ct = default)
     {
+        // Init containers and volumes are pod concepts; the local shim has no equivalent, so they're skipped.
+        var initCount = exec.InitContainers.Count + (exec.Container?.InitContainers.Count ?? 0);
+        var volumeCount = exec.Volumes.Count + (exec.Container?.Volumes.Count ?? 0);
+        if (initCount > 0 || volumeCount > 0)
+            _logger.LogDebug("Local executor ignores {Init} init container(s) and {Volumes} volume(s) on job {Id} (Kubernetes-only).",
+                initCount, volumeCount, exec.Id);
+
         if (exec.Container is not null)
             return StartContainerAsync(exec);
 

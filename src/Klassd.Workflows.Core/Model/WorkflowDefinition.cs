@@ -24,6 +24,37 @@ public sealed class WorkflowNode
     public ContainerSpec? Container { get; init; }
 
     /// <summary>
+    /// Init containers run (to completion, in order) before this node's pod starts — for both
+    /// <c>IJob</c> and container nodes. Combined with any container-level
+    /// (<see cref="Model.ContainerSpec.InitContainers"/>) and executor-wide init containers.
+    /// </summary>
+    public IReadOnlyList<InitContainerSpec> InitContainers { get; init; } = Array.Empty<InitContainerSpec>();
+
+    /// <summary>Pod-level volumes for this node's pod (any node kind). Combined with container-level and executor-wide volumes.</summary>
+    public IReadOnlyList<VolumeSpec> Volumes { get; init; } = Array.Empty<VolumeSpec>();
+
+    /// <summary>Volumes mounted into this node's main container (the worker, or the container image). Combined with executor-wide mounts.</summary>
+    public IReadOnlyList<VolumeMountSpec> VolumeMounts { get; init; } = Array.Empty<VolumeMountSpec>();
+
+    /// <summary>Container security context for this node's main container; null falls back to the executor-wide default.</summary>
+    public SecurityContextSpec? SecurityContext { get; init; }
+
+    /// <summary>Pod security context for this node's pod; null falls back to the executor-wide default.</summary>
+    public PodSecurityContextSpec? PodSecurityContext { get; init; }
+
+    /// <summary>ConfigMaps/Secrets imported as environment variables into this node's main container.</summary>
+    public IReadOnlyList<EnvFromSpec> EnvFrom { get; init; } = Array.Empty<EnvFromSpec>();
+
+    /// <summary>Node-label selector for this node's pod; merged over the executor-wide default.</summary>
+    public IReadOnlyDictionary<string, string> NodeSelector { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>Tolerations for this node's pod; combined with the executor-wide ones.</summary>
+    public IReadOnlyList<TolerationSpec> Tolerations { get; init; } = Array.Empty<TolerationSpec>();
+
+    /// <summary>Affinity for this node's pod; overrides the executor-wide default when set.</summary>
+    public AffinitySpec? Affinity { get; init; }
+
+    /// <summary>
     /// A long-running "service" (daemon) node: it starts, becomes ready, and keeps running while
     /// dependents use it; the engine tears it down once the rest of the run finishes. Readiness
     /// (not exit) satisfies dependents. Mirrors an Argo <c>daemon</c> template.

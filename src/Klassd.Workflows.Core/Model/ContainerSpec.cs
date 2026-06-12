@@ -1,3 +1,5 @@
+using Klassd.Workflows.Abstractions;
+
 namespace Klassd.Workflows.Core.Model;
 
 /// <summary>
@@ -34,4 +36,38 @@ public sealed class ContainerSpec
 
     /// <summary>Container imagePullPolicy ("Always" | "IfNotPresent" | "Never"); null leaves K8s' default.</summary>
     public string? ImagePullPolicy { get; init; }
+
+    /// <summary>
+    /// Init containers run (to completion, in order) before this container starts. Applies to
+    /// standalone container jobs, recurring container jobs, and container DAG nodes. Combined with
+    /// any node-level (<see cref="WorkflowNode.InitContainers"/>) and executor-wide init containers.
+    /// </summary>
+    public IReadOnlyList<InitContainerSpec> InitContainers { get; init; } = Array.Empty<InitContainerSpec>();
+
+    /// <summary>Pod-level volumes for this container's pod. Combined with node-level and executor-wide volumes.</summary>
+    public IReadOnlyList<VolumeSpec> Volumes { get; init; } = Array.Empty<VolumeSpec>();
+
+    /// <summary>Volumes mounted into this (main) container. Combined with node-level and executor-wide mounts.</summary>
+    public IReadOnlyList<VolumeMountSpec> VolumeMounts { get; init; } = Array.Empty<VolumeMountSpec>();
+
+    /// <summary>Container security context for this (main) container; null falls back to the node-level then executor-wide default.</summary>
+    public SecurityContextSpec? SecurityContext { get; init; }
+
+    /// <summary>Pod security context for this container's pod (standalone container jobs); null falls back to the executor-wide default.</summary>
+    public PodSecurityContextSpec? PodSecurityContext { get; init; }
+
+    /// <summary>CPU/memory requests+limits for this (main) container; overlaid on the executor's <c>DefaultResources</c>.</summary>
+    public JobResourceRequirements? Resources { get; init; }
+
+    /// <summary>ConfigMaps/Secrets imported as environment variables into this (main) container.</summary>
+    public IReadOnlyList<EnvFromSpec> EnvFrom { get; init; } = Array.Empty<EnvFromSpec>();
+
+    /// <summary>Node-label selector for this container's pod (standalone container jobs); merged over the executor-wide default.</summary>
+    public IReadOnlyDictionary<string, string> NodeSelector { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>Tolerations for this container's pod; combined with the executor-wide ones.</summary>
+    public IReadOnlyList<TolerationSpec> Tolerations { get; init; } = Array.Empty<TolerationSpec>();
+
+    /// <summary>Affinity for this container's pod; overrides the executor-wide default when set.</summary>
+    public AffinitySpec? Affinity { get; init; }
 }

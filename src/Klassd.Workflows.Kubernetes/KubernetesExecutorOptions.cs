@@ -1,4 +1,5 @@
 using Klassd.Workflows.Abstractions;
+using Klassd.Workflows.Core.Model;
 
 namespace Klassd.Workflows.Kubernetes;
 
@@ -37,6 +38,70 @@ public sealed class KubernetesExecutorOptions
 
     /// <summary>Optional service account for the worker pod.</summary>
     public string? ServiceAccountName { get; set; }
+
+    /// <summary>
+    /// Extra annotations stamped onto every job/proxy <b>pod</b> (the pod template, not the Job).
+    /// This is the seam for sidecar injectors that key off pod annotations — e.g. the Vault agent
+    /// (<c>vault.hashicorp.com/agent-inject: "true"</c>, <c>.../role</c>, <c>.../agent-inject-secret-*</c>)
+    /// writing <c>/secrets/*.json</c> into the pod. Bound from <c>Klassd.Workflows:PodAnnotations</c>.
+    /// </summary>
+    public Dictionary<string, string> PodAnnotations { get; set; } = new();
+
+    /// <summary>
+    /// Extra labels stamped onto every job/proxy pod, merged with the engine's own
+    /// (<c>app</c>, <c>klassd-workflows/execution</c>); the engine's labels win on a key clash.
+    /// Bound from <c>Klassd.Workflows:PodLabels</c>.
+    /// </summary>
+    public Dictionary<string, string> PodLabels { get; set; } = new();
+
+    /// <summary>
+    /// Init containers prepended to <b>every</b> job/proxy pod the engine creates (before any
+    /// node- or container-level init containers). The cross-cutting seam for pre-flight steps on
+    /// all pods — e.g. a secrets-fetch or schema-check container. Bound from
+    /// <c>Klassd.Workflows:InitContainers</c>.
+    /// </summary>
+    public List<InitContainerSpec> InitContainers { get; set; } = new();
+
+    /// <summary>
+    /// Volumes added to <b>every</b> job/proxy pod (combined with node- and container-level volumes).
+    /// Bound from <c>Klassd.Workflows:Volumes</c>.
+    /// </summary>
+    public List<VolumeSpec> Volumes { get; set; } = new();
+
+    /// <summary>
+    /// Volume mounts added to every pod's <b>main</b> container (worker or container image). Init
+    /// containers mount via their own <see cref="InitContainerSpec.VolumeMounts"/>. Bound from
+    /// <c>Klassd.Workflows:VolumeMounts</c>.
+    /// </summary>
+    public List<VolumeMountSpec> VolumeMounts { get; set; } = new();
+
+    /// <summary>
+    /// Default pod security context for every pod; overridden per node/container. Bound from
+    /// <c>Klassd.Workflows:PodSecurityContext</c>.
+    /// </summary>
+    public PodSecurityContextSpec? PodSecurityContext { get; set; }
+
+    /// <summary>
+    /// Default container security context for every container (main + init); overridden per
+    /// container/init/node. Bound from <c>Klassd.Workflows:ContainerSecurityContext</c>.
+    /// </summary>
+    public SecurityContextSpec? ContainerSecurityContext { get; set; }
+
+    /// <summary>
+    /// ConfigMaps/Secrets imported as environment variables into every pod's <b>main</b> container.
+    /// Init containers import via their own <see cref="InitContainerSpec.EnvFrom"/>. Bound from
+    /// <c>Klassd.Workflows:EnvFrom</c>.
+    /// </summary>
+    public List<EnvFromSpec> EnvFrom { get; set; } = new();
+
+    /// <summary>Default node selector merged into every pod (per node/container additions win). Bound from <c>Klassd.Workflows:NodeSelector</c>.</summary>
+    public Dictionary<string, string> NodeSelector { get; set; } = new();
+
+    /// <summary>Tolerations added to every pod (combined with per node/container ones). Bound from <c>Klassd.Workflows:Tolerations</c>.</summary>
+    public List<TolerationSpec> Tolerations { get; set; } = new();
+
+    /// <summary>Default pod affinity; overridden per node/container. Bound from <c>Klassd.Workflows:Affinity</c>.</summary>
+    public AffinitySpec? Affinity { get; set; }
 
     /// <summary>
     /// Directory the "file" artifact provider uses. For cross-pod sharing this

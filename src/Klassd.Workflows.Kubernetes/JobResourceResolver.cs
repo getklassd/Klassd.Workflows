@@ -31,6 +31,20 @@ internal static class JobResourceResolver
         return ToK8s(merged);
     }
 
+    /// <summary>
+    /// Resolves resources for a container/init container that carries its own requirements: the
+    /// executor's <see cref="KubernetesExecutorOptions.DefaultResources"/> overlaid with
+    /// <paramref name="own"/> (per-field; <paramref name="own"/> wins). Used for arbitrary container
+    /// nodes/jobs and init containers, which aren't keyed by an IJob type.
+    /// </summary>
+    public static V1ResourceRequirements? Resolve(JobResourceRequirements? own, KubernetesExecutorOptions options)
+    {
+        var merged = new JobResourceRequirements();
+        if (options.DefaultResources is not null) merged = merged.OverlayWith(options.DefaultResources);
+        if (own is not null) merged = merged.OverlayWith(own);
+        return ToK8s(merged);
+    }
+
     private static V1ResourceRequirements? ToK8s(JobResourceRequirements r)
     {
         if (r.IsEmpty) return null;

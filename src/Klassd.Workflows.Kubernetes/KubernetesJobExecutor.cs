@@ -109,14 +109,17 @@ public sealed class KubernetesJobExecutor : IJobExecutor
                 ActiveDeadlineSeconds = exec.IsService ? _options.ServiceActiveDeadlineSeconds : null,
                 Template = new V1PodTemplateSpec
                 {
-                    Metadata = new V1ObjectMeta
-                    {
-                        Labels = new Dictionary<string, string> { ["app"] = "klassd-workflows", ["klassd-workflows/execution"] = exec.Id }
-                    },
+                    Metadata = PodMetadata(exec),
                     Spec = new V1PodSpec
                     {
                         RestartPolicy = "Never",
                         ServiceAccountName = _options.ServiceAccountName,
+                        SecurityContext = PodSecurityContext(exec),
+                        NodeSelector = BuildNodeSelector(exec),
+                        Tolerations = BuildTolerations(exec),
+                        Affinity = BuildAffinity(exec),
+                        InitContainers = BuildInitContainers(exec),
+                        Volumes = BuildVolumes(exec),
                         Containers = new List<V1Container>
                         {
                             new()
@@ -125,6 +128,9 @@ public sealed class KubernetesJobExecutor : IJobExecutor
                                 Image = _options.WorkerImage,
                                 ImagePullPolicy = _options.ImagePullPolicy,
                                 Env = env,
+                                EnvFrom = MainContainerEnvFrom(exec),
+                                VolumeMounts = MainContainerMounts(exec),
+                                SecurityContext = MainSecurityContext(exec),
                                 Resources = JobResourceResolver.Resolve(exec.JobTypeName, _options)
                             }
                         }
@@ -133,6 +139,202 @@ public sealed class KubernetesJobExecutor : IJobExecutor
             }
         };
     }
+
+    /// <summary>
+    /// Pod-template metadata for every job/proxy pod: the engine's own labels merged over any
+    /// configured <see cref="KubernetesExecutorOptions.PodLabels"/>, plus
+    /// <see cref="KubernetesExecutorOptions.PodAnnotations"/> (the Vault-agent injection seam).
+    /// </summary>
+    private V1ObjectMeta PodMetadata(JobExecution exec)
+    {
+        var labels = new Dictionary<string, string>(_options.PodLabels)
+        {
+            ["app"] = "klassd-workflows",                 // engine labels win on a key clash
+            ["klassd-workflows/execution"] = exec.Id,
+        };
+        return new V1ObjectMeta
+        {
+            Labels = labels,
+            Annotations = _options.PodAnnotations.Count > 0
+                ? new Dictionary<string, string>(_options.PodAnnotations)
+                : null,
+        };
+    }
+
+    /// <summary>
+    /// The effective init containers for a pod, in run order: executor-wide
+    /// (<see cref="KubernetesExecutorOptions.InitContainers"/>) first, then the node-level
+    /// (<see cref="JobExecution.InitContainers"/>), then the container-level
+    /// (<see cref="ContainerSpec.InitContainers"/>). Each gets the pod's resolved arguments as env
+    /// (so e.g. a migration can read a bound <c>db_host</c>), plus its own static env and POD_IP.
+    /// Returns null when there are none.
+    /// </summary>
+    private List<V1Container>? BuildInitContainers(JobExecution exec)
+    {
+        var specs = _options.InitContainers
+            .Concat(exec.InitContainers)
+            .Concat(exec.Container?.InitContainers ?? Enumerable.Empty<InitContainerSpec>())
+            .ToList();
+        if (specs.Count == 0) return null;
+
+        // The node's resolved arguments (bound inputs) shared by all init containers in this pod.
+        var argEnv = exec.Arguments
+            .Where(kv => !kv.Key.StartsWith("__", StringComparison.Ordinal))
+            .Select(kv => new V1EnvVar { Name = kv.Key, Value = kv.Value });
+
+        return specs.Select(spec =>
+        {
+            var env = spec.Env.Select(kv => new V1EnvVar { Name = kv.Key, Value = kv.Value })
+                .Concat(argEnv)
+                .Append(PodIpEnvVar())
+                .ToList();
+            return new V1Container
+            {
+                Name = spec.Name,
+                Image = spec.Image,
+                ImagePullPolicy = spec.ImagePullPolicy ?? _options.ImagePullPolicy,
+                Command = spec.Command.Count > 0 ? spec.Command.ToList() : null,
+                Args = spec.Args.Count > 0 ? spec.Args.ToList() : null,
+                Env = env,
+                VolumeMounts = MapMounts(spec.VolumeMounts),
+                SecurityContext = ToSecurityContext(spec.SecurityContext ?? _options.ContainerSecurityContext),
+                Resources = JobResourceResolver.Resolve(spec.Resources, _options),
+                EnvFrom = MapEnvFrom(spec.EnvFrom),
+            };
+        }).ToList();
+    }
+
+    /// <summary>
+    /// The pod's volumes: executor-wide (<see cref="KubernetesExecutorOptions.Volumes"/>) + node-level
+    /// (<see cref="JobExecution.Volumes"/>) + container-level (<see cref="ContainerSpec.Volumes"/>),
+    /// de-duplicated by name (first wins). Returns null when there are none.
+    /// </summary>
+    private List<V1Volume>? BuildVolumes(JobExecution exec)
+    {
+        var specs = _options.Volumes
+            .Concat(exec.Volumes)
+            .Concat(exec.Container?.Volumes ?? Enumerable.Empty<VolumeSpec>())
+            .GroupBy(v => v.Name).Select(g => g.First())
+            .ToList();
+        return specs.Count == 0 ? null : specs.Select(ToVolume).ToList();
+    }
+
+    /// <summary>
+    /// Mounts for a pod's main container (worker or container image): executor-wide + node-level +
+    /// container-level, de-duplicated by volume name (first wins). Returns null when there are none.
+    /// </summary>
+    private List<V1VolumeMount>? MainContainerMounts(JobExecution exec) => MapMounts(
+        _options.VolumeMounts
+            .Concat(exec.VolumeMounts)
+            .Concat(exec.Container?.VolumeMounts ?? Enumerable.Empty<VolumeMountSpec>())
+            .ToList());
+
+    private static List<V1VolumeMount>? MapMounts(IReadOnlyList<VolumeMountSpec> mounts)
+    {
+        var deduped = mounts.GroupBy(m => m.Name).Select(g => g.First()).ToList();
+        return deduped.Count == 0
+            ? null
+            : deduped.Select(m => new V1VolumeMount
+            {
+                Name = m.Name,
+                MountPath = m.MountPath,
+                SubPath = m.SubPath,
+                ReadOnlyProperty = m.ReadOnly,
+            }).ToList();
+    }
+
+    /// <summary>Effective pod security context: node-level, else container-level, else executor-wide default.</summary>
+    private V1PodSecurityContext? PodSecurityContext(JobExecution exec) =>
+        ToPodSecurityContext(exec.PodSecurityContext ?? exec.Container?.PodSecurityContext ?? _options.PodSecurityContext);
+
+    /// <summary>Effective main-container security context: container-level, else node-level, else executor-wide default.</summary>
+    private V1SecurityContext? MainSecurityContext(JobExecution exec) =>
+        ToSecurityContext(exec.Container?.SecurityContext ?? exec.SecurityContext ?? _options.ContainerSecurityContext);
+
+    private static V1PodSecurityContext? ToPodSecurityContext(PodSecurityContextSpec? s) => s is null ? null : new()
+    {
+        RunAsUser = s.RunAsUser,
+        RunAsGroup = s.RunAsGroup,
+        RunAsNonRoot = s.RunAsNonRoot,
+        FsGroup = s.FsGroup,
+        SupplementalGroups = s.SupplementalGroups.Count > 0 ? s.SupplementalGroups.Select(g => (long?)g).ToList() : null,
+        SeccompProfile = s.SeccompProfileType is null ? null : new V1SeccompProfile { Type = s.SeccompProfileType },
+    };
+
+    private static V1SecurityContext? ToSecurityContext(SecurityContextSpec? s)
+    {
+        if (s is null) return null;
+        var hasCaps = s.AddCapabilities.Count > 0 || s.DropCapabilities.Count > 0;
+        return new V1SecurityContext
+        {
+            RunAsUser = s.RunAsUser,
+            RunAsGroup = s.RunAsGroup,
+            RunAsNonRoot = s.RunAsNonRoot,
+            ReadOnlyRootFilesystem = s.ReadOnlyRootFilesystem,
+            AllowPrivilegeEscalation = s.AllowPrivilegeEscalation,
+            Privileged = s.Privileged,
+            Capabilities = hasCaps
+                ? new V1Capabilities
+                {
+                    Add = s.AddCapabilities.Count > 0 ? s.AddCapabilities.ToList() : null,
+                    Drop = s.DropCapabilities.Count > 0 ? s.DropCapabilities.ToList() : null,
+                }
+                : null,
+            SeccompProfile = s.SeccompProfileType is null ? null : new V1SeccompProfile { Type = s.SeccompProfileType },
+        };
+    }
+
+    /// <summary>Node selector merged executor-wide → node-level → container-level (later wins). Null if empty.</summary>
+    private IDictionary<string, string>? BuildNodeSelector(JobExecution exec)
+    {
+        var merged = new Dictionary<string, string>(_options.NodeSelector);
+        foreach (var (k, v) in exec.NodeSelector) merged[k] = v;
+        if (exec.Container is not null)
+            foreach (var (k, v) in exec.Container.NodeSelector) merged[k] = v;
+        return merged.Count > 0 ? merged : null;
+    }
+
+    /// <summary>Tolerations: executor-wide + node-level + container-level.</summary>
+    private List<V1Toleration>? BuildTolerations(JobExecution exec) => PodSchedulingMapper.Tolerations(
+        _options.Tolerations
+            .Concat(exec.Tolerations)
+            .Concat(exec.Container?.Tolerations ?? Enumerable.Empty<TolerationSpec>()));
+
+    /// <summary>Effective affinity: node-level, else container-level, else executor-wide default.</summary>
+    private V1Affinity? BuildAffinity(JobExecution exec) =>
+        PodSchedulingMapper.Affinity(exec.Affinity ?? exec.Container?.Affinity ?? _options.Affinity);
+
+    /// <summary>Main-container envFrom: executor-wide + node-level + container-level.</summary>
+    private List<V1EnvFromSource>? MainContainerEnvFrom(JobExecution exec) => MapEnvFrom(
+        _options.EnvFrom
+            .Concat(exec.EnvFrom)
+            .Concat(exec.Container?.EnvFrom ?? Enumerable.Empty<EnvFromSpec>()));
+
+    private static List<V1EnvFromSource>? MapEnvFrom(IEnumerable<EnvFromSpec> sources)
+    {
+        var list = sources.Select(s => s.Kind == EnvFromKind.Secret
+            ? new V1EnvFromSource { Prefix = s.Prefix, SecretRef = new V1SecretEnvSource { Name = s.Name, Optional = s.Optional } }
+            : new V1EnvFromSource { Prefix = s.Prefix, ConfigMapRef = new V1ConfigMapEnvSource { Name = s.Name, Optional = s.Optional } })
+            .ToList();
+        return list.Count > 0 ? list : null;
+    }
+
+    private static V1Volume ToVolume(VolumeSpec v) => v.Kind switch
+    {
+        VolumeKind.Secret => new V1Volume { Name = v.Name, Secret = new V1SecretVolumeSource { SecretName = v.Source } },
+        VolumeKind.ConfigMap => new V1Volume { Name = v.Name, ConfigMap = new V1ConfigMapVolumeSource { Name = v.Source } },
+        VolumeKind.PersistentVolumeClaim => new V1Volume
+        {
+            Name = v.Name,
+            PersistentVolumeClaim = new V1PersistentVolumeClaimVolumeSource { ClaimName = v.Source, ReadOnlyProperty = v.ReadOnly },
+        },
+        VolumeKind.HostPath => new V1Volume { Name = v.Name, HostPath = new V1HostPathVolumeSource { Path = v.Source } },
+        _ => new V1Volume
+        {
+            Name = v.Name,
+            EmptyDir = new V1EmptyDirVolumeSource { SizeLimit = v.SizeLimit is null ? null : new ResourceQuantity(v.SizeLimit) },
+        },
+    };
 
     /// <summary>The pod's own IP via the downward API — lets a service job advertise its address.</summary>
     private static V1EnvVar PodIpEnvVar() => new()
@@ -165,7 +367,11 @@ public sealed class KubernetesJobExecutor : IJobExecutor
             Command = spec.Command.Count > 0 ? spec.Command.ToList() : null,
             Args = spec.Args.Count > 0 ? spec.Args.ToList() : null,
             Env = env,
+            EnvFrom = MainContainerEnvFrom(exec),
             Ports = ports.Count > 0 ? ports : null,
+            VolumeMounts = MainContainerMounts(exec),
+            SecurityContext = MainSecurityContext(exec),
+            Resources = JobResourceResolver.Resolve(spec.Resources, _options),
         };
         if (spec.ReadyTcpPort is { } readyPort)
             container.ReadinessProbe = new V1Probe
@@ -191,14 +397,17 @@ public sealed class KubernetesJobExecutor : IJobExecutor
                 ActiveDeadlineSeconds = exec.IsService ? _options.ServiceActiveDeadlineSeconds : null,
                 Template = new V1PodTemplateSpec
                 {
-                    Metadata = new V1ObjectMeta
-                    {
-                        Labels = new Dictionary<string, string> { ["app"] = "klassd-workflows", ["klassd-workflows/execution"] = exec.Id }
-                    },
+                    Metadata = PodMetadata(exec),
                     Spec = new V1PodSpec
                     {
                         RestartPolicy = "Never",
                         ServiceAccountName = _options.ServiceAccountName,
+                        SecurityContext = PodSecurityContext(exec),
+                        NodeSelector = BuildNodeSelector(exec),
+                        Tolerations = BuildTolerations(exec),
+                        Affinity = BuildAffinity(exec),
+                        InitContainers = BuildInitContainers(exec),
+                        Volumes = BuildVolumes(exec),
                         Containers = new List<V1Container> { container }
                     }
                 }

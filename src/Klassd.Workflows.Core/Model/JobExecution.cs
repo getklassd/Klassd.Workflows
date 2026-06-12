@@ -42,6 +42,37 @@ public sealed class JobExecution
     /// <summary>When set, this execution runs an arbitrary container image instead of an <c>IJob</c> via the worker.</summary>
     public ContainerSpec? Container { get; set; }
 
+    /// <summary>
+    /// Node-level init containers for this execution (from <see cref="WorkflowNode.InitContainers"/>).
+    /// The executor also adds any container-level (<see cref="ContainerSpec.InitContainers"/>) and
+    /// executor-wide init containers; this carries the node-level ones.
+    /// </summary>
+    public List<InitContainerSpec> InitContainers { get; set; } = new();
+
+    /// <summary>Node-level pod volumes (from <see cref="WorkflowNode.Volumes"/>).</summary>
+    public List<VolumeSpec> Volumes { get; set; } = new();
+
+    /// <summary>Node-level main-container volume mounts (from <see cref="WorkflowNode.VolumeMounts"/>).</summary>
+    public List<VolumeMountSpec> VolumeMounts { get; set; } = new();
+
+    /// <summary>Node-level main-container security context (from <see cref="WorkflowNode.SecurityContext"/>).</summary>
+    public SecurityContextSpec? SecurityContext { get; set; }
+
+    /// <summary>Node-level pod security context (from <see cref="WorkflowNode.PodSecurityContext"/>).</summary>
+    public PodSecurityContextSpec? PodSecurityContext { get; set; }
+
+    /// <summary>Node-level envFrom sources for the main container (from <see cref="WorkflowNode.EnvFrom"/>).</summary>
+    public List<EnvFromSpec> EnvFrom { get; set; } = new();
+
+    /// <summary>Node-level node selector (from <see cref="WorkflowNode.NodeSelector"/>).</summary>
+    public Dictionary<string, string> NodeSelector { get; set; } = new();
+
+    /// <summary>Node-level tolerations (from <see cref="WorkflowNode.Tolerations"/>).</summary>
+    public List<TolerationSpec> Tolerations { get; set; } = new();
+
+    /// <summary>Node-level affinity (from <see cref="WorkflowNode.Affinity"/>).</summary>
+    public AffinitySpec? Affinity { get; set; }
+
     // --- DAG linkage (null for standalone jobs) ---
     public string? WorkflowRunId { get; set; }
     public string? NodeName { get; set; }

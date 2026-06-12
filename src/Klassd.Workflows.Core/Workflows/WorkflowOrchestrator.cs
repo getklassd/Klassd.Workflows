@@ -319,6 +319,15 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
         exec.NodeName = node.Name;
         exec.Container = defNode.Container;
         exec.IsService = defNode.IsService;
+        exec.InitContainers = defNode.InitContainers.ToList();
+        exec.Volumes = defNode.Volumes.ToList();
+        exec.VolumeMounts = defNode.VolumeMounts.ToList();
+        exec.SecurityContext = defNode.SecurityContext;
+        exec.PodSecurityContext = defNode.PodSecurityContext;
+        exec.EnvFrom = defNode.EnvFrom.ToList();
+        exec.NodeSelector = new Dictionary<string, string>(defNode.NodeSelector);
+        exec.Tolerations = defNode.Tolerations.ToList();
+        exec.Affinity = defNode.Affinity;
         await _store.UpdateAsync(exec);
         task.Attempts.Add(exec.Id);
         await _executor.StartAsync(exec);
