@@ -22,6 +22,12 @@ public sealed class KubernetesJobExecutor : IJobExecutor
     private readonly ILogger<KubernetesJobExecutor> _logger;
     private readonly k8s.Kubernetes _client;
 
+    // The pod's main container names. Logs must be tailed by name: an injected sidecar (e.g. the
+    // Vault agent, added via PodAnnotations) makes the pod multi-container, and an unqualified
+    // log request then fails with "a container name must be specified".
+    private const string WorkerContainerName = "worker";
+    private const string JobContainerName = "container";
+
     public string Name => "kubernetes";
 
     public KubernetesJobExecutor(IJobStore store, IOptions<KubernetesExecutorOptions> options,
@@ -124,7 +130,7 @@ public sealed class KubernetesJobExecutor : IJobExecutor
                         {
                             new()
                             {
-                                Name = "worker",
+                                Name = WorkerContainerName,
                                 Image = _options.WorkerImage,
                                 ImagePullPolicy = _options.ImagePullPolicy,
                                 Env = env,
@@ -361,7 +367,7 @@ public sealed class KubernetesJobExecutor : IJobExecutor
 
         var container = new V1Container
         {
-            Name = "container",
+            Name = JobContainerName,
             Image = spec.Image,
             ImagePullPolicy = spec.ImagePullPolicy ?? _options.ImagePullPolicy,
             Command = spec.Command.Count > 0 ? spec.Command.ToList() : null,
@@ -437,7 +443,7 @@ public sealed class KubernetesJobExecutor : IJobExecutor
             try
             {
                 using var response = await _client.CoreV1.ReadNamespacedPodLogWithHttpMessagesAsync(
-                    podName, _options.Namespace, follow: true);
+                    podName, _options.Namespace, container: JobContainerName, follow: true);
                 using var reader = new StreamReader(response.Body);
                 while (await reader.ReadLineAsync() is { } line)
                     await _store.AppendLogAsync(exec.Id, $"[{DateTimeOffset.Now:HH:mm:ss}] {line}");
@@ -543,7 +549,7 @@ public sealed class KubernetesJobExecutor : IJobExecutor
             }
 
             using var response = await _client.CoreV1.ReadNamespacedPodLogWithHttpMessagesAsync(
-                podName, _options.Namespace, follow: true);
+                podName, _options.Namespace, container: WorkerContainerName, follow: true);
             using var reader = new StreamReader(response.Body);
 
             while (await reader.ReadLineAsync() is { } line)
