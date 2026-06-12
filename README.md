@@ -59,6 +59,26 @@ The host needs `<RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>` in its 
 `.razor` of its own (otherwise `_framework/blazor.web.js` 404s). `samples/Klassd.Workflows.DashboardHost`
 is a complete, runnable example.
 
+### Authentication
+
+Dashboard sign-in is powered by the standalone [**Klassd.Auth**](https://github.com/getklassd/Klassd.Auth)
+suite. Add it with two lines:
+
+```csharp
+builder.Services.AddKlassdWorkflowsAuth(o =>
+{
+    o.SeedAdminEmail = "admin@example.com";
+    o.SeedAdminPassword = builder.Configuration["Seed:AdminPassword"];
+    o.BypassOnLoopback = true;          // no login on localhost / kubectl port-forward (dev)
+});
+// ...
+app.UseKlassdWorkflowsAuth();            // auth middleware + /auth/login, /auth/logout, /auth/external/{scheme}
+```
+
+Email/password admins are managed in the dashboard's **Users** area; SSO is added with
+`AddKlassdWorkflowsOpenIdConnect(...)` (a thin wrapper over `Klassd.Auth.OpenIdConnect`). Users live
+in the Klassd.Auth store, sharing your chosen storage adapter's database.
+
 ## Quickstart
 
 A working jobs service with the live dashboard in four steps. (For dev you can stop after step 3 —
@@ -453,7 +473,8 @@ add later:
 - Distributed locking so multiple scheduler replicas don't double-fire cron,
   and bridging store change-events to LISTEN/NOTIFY / change streams for HA.
 - Retry backoff/delay (retries are immediate today).
-- AuthN/AuthZ on the dashboard.
+- Fine-grained dashboard authorization (roles/permissions) — sign-in is done
+  (via [Klassd.Auth](https://github.com/getklassd/Klassd.Auth)), per-action authz is not.
 
 ## License
 

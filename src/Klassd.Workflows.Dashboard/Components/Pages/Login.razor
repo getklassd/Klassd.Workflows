@@ -1,6 +1,7 @@
 @page "/login"
 @layout BareLayout
 @attribute [AllowAnonymous]
+@using Klassd.Auth.AspNetCore.Cookies
 @using Klassd.Workflows.Auth
 @inject KlassdWorkflowsAuthOptions Options
 @inject ExternalLoginRegistry ExternalLogins
@@ -17,9 +18,10 @@
         @if (LocalLoginEnabled)
         {
             <form method="post" action="/auth/login">
+                <input type="hidden" name="returnUrl" value="/" />
                 <div class="form-group">
                     <label>Email</label>
-                    <input type="email" name="email" autocomplete="username" placeholder="you@example.com" />
+                    <input type="email" name="identifier" autocomplete="username" placeholder="you@example.com" />
                 </div>
                 <div class="form-group">
                     <label>Password</label>
@@ -48,10 +50,13 @@
 @code {
     [SupplyParameterFromQuery(Name = "error")] public string? ErrorParam { get; set; }
     private bool Error => !string.IsNullOrEmpty(ErrorParam);
-    private bool LocalLoginEnabled => Options.LocalLoginEnabled(ExternalLogins);
+
+    // Local sign-in is forced on when no external providers are configured (anti-lockout).
+    private bool LocalLoginEnabled => Options.AllowLocalLogin || ExternalLogins.Providers.Count == 0;
+
     private string ErrorMessage => ErrorParam switch
     {
-        "sso" => "Single sign-on failed or your account is not allowed.",
+        "external" or "not_provisioned" or "sso" => "Single sign-on failed or your account is not allowed.",
         _ => "Invalid email or password.",
     };
 }

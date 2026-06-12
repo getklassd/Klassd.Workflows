@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="Npgsql" />
+    <PackageReference Include="Klassd.Auth.Data.Postgres" />
   </ItemGroup>
 
 </Project>
