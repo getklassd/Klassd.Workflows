@@ -240,7 +240,7 @@ registry.Register(new WorkflowBuilder("catalog-integration")
     .Add<DataProxyJob>("data-proxy")                       // parallel root: writes a dataset artifact
     .Add<IntegrationJob>("integration", n => n
         .DependsOn("markets", "data-proxy")
-        .FanOutOver("markets", "market_ids", itemArgument: "market"))  // one pod per market
+        .FanOutOver("markets", "market_ids", itemArgument: "market", maxParallelism: 5))  // one pod per market, ≤5 at once
     .Add<PublishJob>("publish", n => n
         .DependsOn("integration")
         .WithRetries(2))                                   // retry on failure
@@ -267,8 +267,16 @@ Semantics (mirroring Argo):
 - **fan-out (`withParam`)** — `FanOutOver(source, outputKey, item)` reads the
   source node's output as a JSON array and starts one execution per element,
   exposed as the `item` argument. The node joins when all fan-out executions finish.
+  Pass `maxParallelism: n` to cap how many run at once (0 = unlimited) so a large
+  list doesn't spawn `n` pods simultaneously — the engine drip-feeds the rest.
 - **inputs (`BindInput`)** — bind an argument to an upstream node's output
-  (`"sourceNode.outputKey"`).
+  (`"sourceNode.outputKey"`). For a service/container node's published address use
+  `BindServiceAddress(arg, node)` / `BindServiceIp(arg, node)` (no need to know the
+  `address`/`ip` key — Argo's `{{tasks.x.ip}}`); they also add the dependency.
+- **file outputs (`valueFrom.path`)** — `WithFileOutput(name, path, default)`
+  publishes a node output from a file the step writes (or the `default` if it's
+  missing/empty) — for both `IJob` and arbitrary-container nodes. Handy to produce a
+  fan-out list from a container that just writes a JSON file.
 - **retries** — `WithRetries(n)` re-runs a failed execution up to `n` times
   (per fan-out item). Each attempt gets its 0-based index in the `__attempt`
   argument. The graph marks retried nodes with `↻`.
