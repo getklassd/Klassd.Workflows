@@ -17,6 +17,21 @@ var builder = WebApplication.CreateBuilder(args);
 // The dashboard reads the theme cookie during SSR.
 builder.Services.AddHttpContextAccessor();
 
+// --- Authentication ---------------------------------------------------------
+// Registered first so the durable store selection below can attach the matching Klassd.Auth user
+// store to it. Users admin + email/password sign-in, mirroring Klassd CMS. Loopback (local dev +
+// `kubectl port-forward`) is bypassed, so neither needs a login. A seed admin is created on first
+// run from config so a fresh deployment isn't locked out. Optionally add OIDC SSO under "Oidc"
+// (SSO identities are linked to an existing user by email, or auto-provisioned).
+builder.Services.AddKlassdWorkflowsAuth(o =>
+{
+    o.SigningKey = builder.Configuration["Auth:SigningKey"];
+    o.SeedAdminEmail = builder.Configuration["Auth:SeedAdmin:Email"];
+    o.SeedAdminPassword = builder.Configuration["Auth:SeedAdmin:Password"];
+});
+if (!string.IsNullOrWhiteSpace(builder.Configuration["Oidc:Authority"]))
+    builder.Services.AddKlassdWorkflowsOpenIdConnect("Company SSO", builder.Configuration.GetSection("Oidc"));
+
 // --- Klassd.Workflows wiring -------------------------------------------------
 var workflows = builder.Services.AddKlassdWorkflowsCore();
 
@@ -46,20 +61,6 @@ else
 
 // The dashboard UI (Blazor Interactive Server).
 builder.Services.AddKlassdWorkflowsDashboard();
-
-// --- Authentication ---------------------------------------------------------
-// Users admin + email/password sign-in, mirroring Klassd CMS. Loopback (local dev +
-// `kubectl port-forward`) is bypassed, so neither needs a login. A seed admin is created on first
-// run from config so a fresh deployment isn't locked out. Optionally add OIDC SSO under "Oidc"
-// (SSO identities are linked to an existing user by email, or auto-provisioned).
-builder.Services.AddKlassdWorkflowsAuth(o =>
-{
-    o.SeedAdminEmail = builder.Configuration["Auth:SeedAdmin:Email"];
-    o.SeedAdminPassword = builder.Configuration["Auth:SeedAdmin:Password"];
-});
-if (!string.IsNullOrWhiteSpace(builder.Configuration["Oidc:Authority"]))
-    builder.Services.AddKlassdWorkflowsOpenIdConnect("Company SSO", builder.Configuration.GetSection("Oidc"));
-// ------------------------------------------------------------------------
 
 var app = builder.Build();
 

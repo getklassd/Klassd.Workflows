@@ -2,9 +2,9 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @using System.Security.Claims
-@using Klassd.Workflows.Abstractions
-@using Klassd.Workflows.Auth
-@inject WorkflowsUserService UserSvc
+@using Klassd.Auth.Abstractions
+@using Klassd.Auth.Core.Modules.Users
+@inject UserAccountService UserSvc
 
 <PageTitle>Users</PageTitle>
 
@@ -59,16 +59,17 @@ else
             <tbody>
                 @foreach (var u in _users)
                 {
+                    var provider = ProviderOf(u);
                     <tr>
                         <td>
-                            @u.Email
+                            @(u.PrimaryEmail ?? u.Username)
                             @if (u.Id == _currentUserId)
                             {
                                 <span class="badge badge-success" style="margin-left:6px;">you</span>
                             }
                         </td>
                         <td>
-                            <span class="badge @(u.Provider == "local" ? "badge-ghost" : "badge-info")">@u.Provider</span>
+                            <span class="badge @(provider == "local" ? "badge-ghost" : "badge-info")">@provider</span>
                         </td>
                         <td>@(u.Disabled ? "Disabled" : "Active")</td>
                         <td style="text-align:right; white-space:nowrap;">
@@ -94,7 +95,7 @@ else
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
-    private IReadOnlyList<WorkflowsUser>? _users;
+    private IReadOnlyList<User>? _users;
     private string? _currentUserId;
     private bool _creating;
     private string _newEmail = "";
@@ -102,6 +103,14 @@ else
     private readonly Dictionary<string, string> _resetInputs = new();
     private string? _message;
     private bool _isError;
+
+    private static string Label(User u) => u.PrimaryEmail ?? u.Username ?? u.Id;
+
+    private static string ProviderOf(User u)
+    {
+        var external = u.LoginMethods.FirstOrDefault(m => m.Kind == LoginMethodKind.ThirdParty);
+        return external?.ProviderId ?? "local";
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -130,27 +139,37 @@ else
     {
         try
         {
-            var created = await UserSvc.CreateAsync(_newEmail, _newPassword);
+            if (string.IsNullOrWhiteSpace(_newEmail))
+            {
+                Notify("Email is required.", error: true);
+                return;
+            }
+            if (await UserSvc.FindByEmailAsync(_newEmail) is not null)
+            {
+                Notify($"A user with email '{_newEmail}' already exists.", error: true);
+                return;
+            }
+            var created = await UserSvc.CreateLocalAsync(null, _newEmail, _newPassword);
             _newEmail = _newPassword = "";
             _creating = false;
             await ReloadAsync();
-            Notify($"User '{created.Email}' created.");
+            Notify($"User '{Label(created)}' created.");
         }
-        catch (InvalidOperationException ex)
+        catch (ArgumentException ex)
         {
             Notify(ex.Message, error: true);
         }
     }
 
-    private async Task ToggleDisabledAsync(WorkflowsUser user)
+    private async Task ToggleDisabledAsync(User user)
     {
         if (user.Id == _currentUserId) return;
         await UserSvc.SetDisabledAsync(user.Id, !user.Disabled);
         await ReloadAsync();
-        Notify(user.Disabled ? $"'{user.Email}' enabled." : $"'{user.Email}' disabled.");
+        Notify(user.Disabled ? $"'{Label(user)}' enabled." : $"'{Label(user)}' disabled.");
     }
 
-    private async Task ResetPasswordAsync(WorkflowsUser user)
+    private async Task ResetPasswordAsync(User user)
     {
         var pwd = _resetInputs.GetValueOrDefault(user.Id, "");
         if (string.IsNullOrEmpty(pwd))
@@ -160,6 +179,6 @@ else
         }
         await UserSvc.ResetPasswordAsync(user.Id, pwd);
         _resetInputs[user.Id] = "";
-        Notify($"Password updated for '{user.Email}'.");
+        Notify($"Password updated for '{Label(user)}'.");
     }
 }

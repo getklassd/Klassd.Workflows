@@ -3,7 +3,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Klassd.Workflows.Auth.OpenIdConnect</PackageId>
-    <Description>OpenID Connect / OAuth 2.0 single sign-on for the Klassd.Workflows dashboard (Entra ID, Okta, Auth0, Google, Ping, …) — the same OIDC flow Klassd CMS uses. Built on Klassd.Workflows.Auth's external-login seam: signs in via the IdP, then links to or provisions a dashboard user by email. AddKlassdWorkflowsOpenIdConnect().</Description>
+    <Description>OpenID Connect / OAuth 2.0 single sign-on for the Klassd.Workflows dashboard (Entra ID, Okta, Auth0, Google, Ping, …). A thin profile over Klassd.Auth.OpenIdConnect: signs in via the IdP, then links to or provisions a dashboard user by email. AddKlassdWorkflowsOpenIdConnect().</Description>
     <PackageTags>workflows;dashboard;auth;oidc;openid-connect;sso;dotnet</PackageTags>
   </PropertyGroup>
 
@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
+    <PackageReference Include="Klassd.Auth.OpenIdConnect" />
   </ItemGroup>
 
   <ItemGroup>

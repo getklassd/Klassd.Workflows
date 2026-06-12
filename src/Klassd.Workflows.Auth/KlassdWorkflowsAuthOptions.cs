@@ -1,10 +1,14 @@
-using System.Security.Claims;
-
 namespace Klassd.Workflows.Auth;
 
 /// <summary>Knobs for the Klassd.Workflows dashboard authentication.</summary>
 public sealed class KlassdWorkflowsAuthOptions
 {
+    /// <summary>
+    /// Symmetric signing key for issued sessions (HS256). Must be at least 32 characters. When unset a
+    /// fixed development key is used — set this (e.g. from configuration) for any real deployment.
+    /// </summary>
+    public string? SigningKey { get; set; }
+
     /// <summary>Name of the auth cookie issued after sign-in. Defaults to <c>klassd_wf_auth</c>.</summary>
     public string CookieName { get; set; } = "klassd_wf_auth";
 
@@ -40,26 +44,4 @@ public sealed class KlassdWorkflowsAuthOptions
 
     /// <summary>Password for the seeded admin (see <see cref="SeedAdminEmail"/>).</summary>
     public string? SeedAdminPassword { get; set; }
-
-    /// <summary>Maps external (SSO) claims to an <see cref="ExternalUserInfo"/>. Defaults to standard
-    /// OIDC claims (sub / NameIdentifier + email).</summary>
-    public Func<ClaimsPrincipal, ExternalUserInfo>? MapExternalUser { get; set; }
-}
-
-/// <summary>
-/// Holds the configured external login providers so the login page can render a button per provider.
-/// Registered as a singleton; populated by <c>AddExternalLogin</c> (e.g. via the OIDC package).
-/// </summary>
-public sealed class ExternalLoginRegistry
-{
-    private readonly List<ExternalLoginDescriptor> _providers = [];
-
-    public IReadOnlyList<ExternalLoginDescriptor> Providers => _providers;
-
-    public void Add(ExternalLoginDescriptor descriptor)
-    {
-        if (_providers.Any(p => p.Scheme == descriptor.Scheme))
-            throw new InvalidOperationException($"An external login with scheme '{descriptor.Scheme}' is already registered.");
-        _providers.Add(descriptor);
-    }
 }

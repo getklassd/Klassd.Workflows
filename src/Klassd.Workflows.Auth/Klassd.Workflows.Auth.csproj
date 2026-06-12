@@ -3,7 +3,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Klassd.Workflows.Auth</PackageId>
-    <Description>Authentication for the Klassd.Workflows dashboard: a Users admin (email + password local accounts) plus cookie sign-in, mirroring the Klassd CMS auth model but standalone. SSO is added separately via Klassd.Workflows.Auth.OpenIdConnect, which links to an existing user by email. Authentication is bypassed for loopback requests, so local development and `kubectl port-forward` need no login. AddKlassdWorkflowsAuth() + UseKlassdWorkflowsAuth().</Description>
+    <Description>Authentication for the Klassd.Workflows dashboard: a Users admin (email + password local accounts) plus cookie sign-in. A thin profile over the Klassd.Auth packages — SSO is added separately via Klassd.Workflows.Auth.OpenIdConnect, which links to an existing user by email. Authentication is bypassed for loopback requests, so local development and `kubectl port-forward` need no login. AddKlassdWorkflowsAuth() + UseKlassdWorkflowsAuth().</Description>
     <PackageTags>workflows;dashboard;auth;authentication;users;cookie;sso;dotnet</PackageTags>
   </PropertyGroup>
 
@@ -12,7 +12,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
+    <PackageReference Include="Klassd.Auth.Core" />
+    <PackageReference Include="Klassd.Auth.AspNetCore.Cookies" />
+    <PackageReference Include="Klassd.Auth.Data.Sqlite" />
   </ItemGroup>
 
 </Project>

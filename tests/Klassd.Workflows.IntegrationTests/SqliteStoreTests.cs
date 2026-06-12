@@ -16,32 +16,6 @@ public class SqliteStoreTests
     }
 
     [Test]
-    public async Task User_store_round_trips_and_links_external()
-    {
-        var db = TempDb();
-        try
-        {
-            var store = new SqliteUserStore($"Data Source={db}");
-            var user = new WorkflowsUser { Id = "u1", Email = "a@b.com", PasswordHash = "h", Provider = "local" };
-            await store.InsertAsync(user);
-
-            await Assert.That((await store.FindByEmailAsync("a@b.com"))!.Id).IsEqualTo("u1");
-            await Assert.That((await store.GetByIdAsync("u1"))!.Email).IsEqualTo("a@b.com");
-
-            user.Provider = "oidc";
-            user.ExternalId = "sub-1";
-            user.Disabled = true;
-            await store.UpdateAsync(user);
-
-            var byExt = await store.FindByExternalAsync("oidc", "sub-1");
-            await Assert.That(byExt!.Id).IsEqualTo("u1");
-            await Assert.That(byExt.Disabled).IsTrue();
-            await Assert.That((await store.GetAllAsync()).Count).IsEqualTo(1);
-        }
-        finally { Cleanup(db); }
-    }
-
-    [Test]
     public async Task Job_store_persists_executions_logs_recurring_and_runs()
     {
         var db = TempDb();

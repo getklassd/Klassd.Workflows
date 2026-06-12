@@ -1,4 +1,5 @@
-using Klassd.Workflows.Auth;
+using Klassd.Auth.Abstractions;
+using Klassd.Auth.OpenIdConnect;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,9 +8,9 @@ namespace Klassd.Workflows.Auth.OpenIdConnect;
 
 /// <summary>
 /// Adds OpenID Connect / OAuth 2.0 single sign-on to the dashboard — the same OIDC flow Klassd CMS
-/// uses (Entra ID, Okta, Auth0, Google, Ping, …). Built on the external-login seam: the handler signs
-/// into the temporary external cookie and the callback links/provisions a dashboard user by email.
-/// Requires <see cref="KlassdWorkflowsAuthExtensions.AddKlassdWorkflowsAuth"/> first.
+/// uses (Entra ID, Okta, Auth0, Google, Ping, …). A thin wrapper over Klassd.Auth.OpenIdConnect: the
+/// handler signs into the temporary external cookie and the callback links/provisions a dashboard user
+/// by email. Requires <see cref="KlassdWorkflowsAuthExtensions.AddKlassdWorkflowsAuth"/> first.
 /// </summary>
 public static class OpenIdConnectAuthExtensions
 {
@@ -19,14 +20,8 @@ public static class OpenIdConnectAuthExtensions
         string scheme = "oidc")
     {
         ArgumentNullException.ThrowIfNull(configure);
-        return services.AddExternalLogin(scheme, displayName, auth =>
-            auth.AddOpenIdConnect(scheme, options =>
-            {
-                options.SignInScheme = KlassdWorkflowsAuthSchemes.External; // exchanged for the dashboard cookie
-                options.CallbackPath = $"/signin-{scheme}";
-                options.GetClaimsFromUserInfoEndpoint = true;
-                configure(options);
-            }));
+        ResolveAuthBuilder(services).AddOpenIdConnect(displayName, configure, scheme);
+        return services;
     }
 
     /// <summary>
@@ -55,4 +50,9 @@ public static class OpenIdConnectAuthExtensions
             }
         }, scheme);
     }
+
+    private static IAuthBuilder ResolveAuthBuilder(IServiceCollection services) =>
+        services.LastOrDefault(d => d.ServiceType == typeof(IAuthBuilder))?.ImplementationInstance as IAuthBuilder
+            ?? throw new InvalidOperationException(
+                "Klassd.Workflows auth is not registered. Call AddKlassdWorkflowsAuth() before AddKlassdWorkflowsOpenIdConnect().");
 }
