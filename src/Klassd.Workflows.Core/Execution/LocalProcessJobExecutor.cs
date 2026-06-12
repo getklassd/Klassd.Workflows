@@ -147,9 +147,13 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
         exec.Status = JobStatus.Starting;
         await _store.UpdateAsync(exec);
 
-        // docker run [-d] --rm [-p 127.0.0.1::<servicePort>] -e K=V ... [--entrypoint cmd0] image [args]
-        var args = new List<string> { "run", "--rm" };
+        // docker run [-d|--rm] [-p 127.0.0.1::<servicePort>] -e K=V ... [--entrypoint cmd0] image [args]
+        // Services run detached and are NOT auto-removed: if one crashes we want the dead container to
+        // linger so we can read its logs and exit code. We rm it explicitly at teardown (StopAsync).
+        // Run-to-completion containers self-clean with --rm.
+        var args = new List<string> { "run" };
         if (exec.IsService) args.Add("-d");
+        else args.Add("--rm");
         if (spec.ServicePort is { } sp) { args.Add("-p"); args.Add($"127.0.0.1::{sp}"); }
 
         foreach (var (k, v) in spec.Env) { args.Add("-e"); args.Add($"{k}={v}"); }
@@ -208,6 +212,24 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
         var containerId = stdout.Trim().Split('\n')[^1].Trim();
         _containers[exec.Id] = containerId;
         exec.ExecutorHandle = $"docker:{containerId[..Math.Min(12, containerId.Length)]}";
+
+        // Guard against an image that crashes on startup (e.g. cloud-sql-proxy pointed at a bad
+        // instance / missing credentials). Without this we'd stream logs and probe a container that's
+        // already gone, surfacing a cryptic "No such container" instead of the real reason.
+        var (exists, running, exitCode) = await InspectContainerAsync(containerId);
+        if (!exists || !running)
+        {
+            var (_, outLog, errLog) = await RunDockerCaptureAsync(["logs", containerId]);
+            var detail = $"{outLog}{errLog}".Trim();
+            if (detail.Length > 800) detail = "…" + detail[^800..];
+            _containers.TryRemove(exec.Id, out _);
+            try { RunDocker($"rm -f {containerId}", waitForExit: true); } catch { /* best effort */ }
+            await FailAsync(exec.Id,
+                $"Service container '{exec.JobName}' exited during startup (exit code {exitCode})"
+                + (detail.Length > 0 ? $": {detail}" : "."));
+            return;
+        }
+
         exec.Status = JobStatus.Running;
         exec.StartedAt ??= DateTimeOffset.UtcNow;
 
@@ -229,10 +251,21 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
 
         StreamContainerLogs(exec.Id, containerId);
 
-        // Readiness: wait until the published port accepts a TCP connection (best effort).
+        // Readiness: wait until the published port accepts a TCP connection.
         var probePort = hostPort ?? spec.ReadyTcpPort;
-        if (probePort is { } pp)
-            await WaitTcpAsync("127.0.0.1", pp, TimeSpan.FromSeconds(30));
+        if (probePort is { } pp && !await WaitTcpAsync("127.0.0.1", pp, TimeSpan.FromSeconds(30)))
+        {
+            // Port never opened. The container may have crashed late or just be wedged — surface why.
+            var (_, outLog, errLog) = await RunDockerCaptureAsync(["logs", "--tail", "40", containerId]);
+            var detail = $"{outLog}{errLog}".Trim();
+            if (detail.Length > 800) detail = "…" + detail[^800..];
+            _containers.TryRemove(exec.Id, out _);
+            try { RunDocker($"rm -f {containerId}", waitForExit: true); } catch { /* best effort */ }
+            await FailAsync(exec.Id,
+                $"Service container '{exec.JobName}' did not become ready on port {pp} within 30s"
+                + (detail.Length > 0 ? $": {detail}" : "."));
+            return;
+        }
 
         var live = await _store.GetAsync(exec.Id);
         if (live is { IsTerminal: false } && !live.Ready)
@@ -317,7 +350,8 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
         }
     }
 
-    private static async Task WaitTcpAsync(string host, int port, TimeSpan timeout)
+    // Returns true once the port accepts a connection, false if the timeout elapses first.
+    private static async Task<bool> WaitTcpAsync(string host, int port, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
@@ -327,10 +361,11 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
                 using var client = new TcpClient();
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
                 await client.ConnectAsync(host, port, cts.Token);
-                return; // connected → ready
+                return true; // connected → ready
             }
             catch { await Task.Delay(500); }
         }
+        return false;
     }
 
     private Process StartDocker(IEnumerable<string> args, out bool started)
@@ -348,6 +383,18 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
         try { started = proc.Start(); }
         catch (Exception ex) { _logger.LogError(ex, "Failed to start docker"); started = false; }
         return proc;
+    }
+
+    // Best-effort container state probe: (exists, running, exitCode). exists=false if docker can't find it.
+    private async Task<(bool exists, bool running, int exitCode)> InspectContainerAsync(string containerId)
+    {
+        var (code, stdout, _) = await RunDockerCaptureAsync(
+            ["inspect", "-f", "{{.State.Running}} {{.State.ExitCode}}", containerId]);
+        if (code != 0) return (false, false, 0);
+        var parts = stdout.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var running = parts.Length > 0 && parts[0].Equals("true", StringComparison.OrdinalIgnoreCase);
+        var exit = parts.Length > 1 && int.TryParse(parts[1], out var c) ? c : 0;
+        return (true, running, exit);
     }
 
     private async Task<(int code, string stdout, string stderr)> RunDockerCaptureAsync(IEnumerable<string> args)
