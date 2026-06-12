@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- The "library path" for building a worker image: a thin exe that references the worker host
+       package plus the job assemblies it should run. `dotnet publish` produces a self-contained
+       worker image with these jobs baked in. Used by the DashboardHost local executor and the
+       Kubernetes integration tests. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Worker\Klassd.Workflows.Worker.csproj" />
+    <ProjectReference Include="..\Klassd.Workflows.SampleJobs\Klassd.Workflows.SampleJobs.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Artifacts.Gcs\Klassd.Workflows.Artifacts.Gcs.csproj" />
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Artifacts.S3\Klassd.Workflows.Artifacts.S3.csproj" />
+  </ItemGroup>
+
+</Project>

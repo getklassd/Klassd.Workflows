@@ -17,6 +17,13 @@ internal sealed class KubernetesCluster : IAsyncDisposable
 {
     public const string WorkerImage = "klassd.test/worker:it";
 
+    // Small public images the container-node tests run as arbitrary images. Unlike the worker image
+    // (built locally and side-loaded), these are pulled by the cluster itself — those nodes set
+    // imagePullPolicy=IfNotPresent to override the host's global Never. ctr can't import a pulled
+    // image's docker-save tar (manifest-list/OCI layout → "content digest not found").
+    public const string BusyboxImage = "busybox:1.36";
+    public const string NginxImage = "nginx:1.27-alpine";
+
     private K3sContainer _container = null!;
 
     public string KubeConfigPath { get; private set; } = "";
@@ -39,16 +46,31 @@ internal sealed class KubernetesCluster : IAsyncDisposable
         await BuildAndLoadWorkerImageAsync(ct);
     }
 
+    private async Task ImportIntoNodeAsync(DockerClient docker, string image, string tarPath, CancellationToken ct)
+    {
+        await using var tar = await docker.Images.SaveImageAsync(image, ct);
+        await using var buffer = new MemoryStream();
+        await tar.CopyToAsync(buffer, ct);
+        await _container.CopyAsync(buffer.ToArray(), tarPath, ct: ct);
+
+        var result = await _container.ExecAsync(["ctr", "-n", "k8s.io", "images", "import", tarPath], ct);
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException(
+                $"Importing image '{image}' into K3s failed (exit {result.ExitCode}).\n{result.Stdout}\n{result.Stderr}");
+    }
+
+
     private async Task BuildAndLoadWorkerImageAsync(CancellationToken ct)
     {
         var repoRoot = FindRepoRoot();
 
         // Build the worker image from the solution-root context (the Dockerfile COPYs the repo
-        // and `dotnet publish`es the worker + referenced job assemblies).
+        // and `dotnet publish`es the sample worker — the library-path worker exe = the worker host
+        // package + the sample job assemblies).
         IFutureDockerImage image = new ImageFromDockerfileBuilder()
             .WithName(WorkerImage)
             .WithDockerfileDirectory(repoRoot)
-            .WithDockerfile("src/Klassd.Workflows.Worker/Dockerfile")
+            .WithDockerfile("samples/Klassd.Workflows.SampleWorker/Dockerfile")
             .WithCleanUp(false)
             .WithDeleteIfExists(true)
             .Build();
@@ -58,17 +80,7 @@ internal sealed class KubernetesCluster : IAsyncDisposable
         // The Docker client targets Testcontainers' own resolved endpoint.
         var endpoint = TestcontainersSettings.OS.DockerEndpointAuthConfig.Endpoint;
         using var docker = new DockerClientBuilder().WithEndpoint(endpoint).Build();
-        await using var tar = await docker.Images.SaveImageAsync(WorkerImage, ct);
-        await using var buffer = new MemoryStream();
-        await tar.CopyToAsync(buffer, ct);
-
-        const string tarPath = "/tmp/worker-image.tar";
-        await _container.CopyAsync(buffer.ToArray(), tarPath, ct: ct);
-
-        var result = await _container.ExecAsync(["ctr", "-n", "k8s.io", "images", "import", tarPath], ct);
-        if (result.ExitCode != 0)
-            throw new InvalidOperationException(
-                $"Importing the worker image into K3s failed (exit {result.ExitCode}).\n{result.Stdout}\n{result.Stderr}");
+        await ImportIntoNodeAsync(docker, WorkerImage, "/tmp/worker-image.tar", ct);
     }
 
     public async ValueTask DisposeAsync()

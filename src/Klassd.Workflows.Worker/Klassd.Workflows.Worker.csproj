@@ -1,16 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>Klassd.Workflows.Worker</PackageId>
+    <Description>The Klassd.Workflows worker host: WorkerHost.RunAsync() is the executor-pod entry point that loads the requested IJob from the assemblies beside it and runs it against the stdout protocol. Reference this from a thin exe plus your job assemblies to build your own worker image, or layer your job DLLs onto the published base image. Implement IWorkerStartup for constructor-injected jobs.</Description>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
     <ProjectReference Include="..\Klassd.Workflows.Core\Klassd.Workflows.Core.csproj" />
-    <ProjectReference Include="..\..\samples\Klassd.Workflows.SampleJobs\Klassd.Workflows.SampleJobs.csproj" />
-    <ProjectReference Include="..\Klassd.Workflows.Artifacts.Gcs\Klassd.Workflows.Artifacts.Gcs.csproj" />
-    <ProjectReference Include="..\Klassd.Workflows.Artifacts.S3\Klassd.Workflows.Artifacts.S3.csproj" />
   </ItemGroup>
 
-  <PropertyGroup>
-    <!-- Executor-pod entrypoint (built into the worker image); not shipped as a package. -->
-    <OutputType>Exe</OutputType>
-  </PropertyGroup>
+  <ItemGroup>
+    <!-- Self-bootstraps its own configuration (appsettings + /secrets + env) and DI container. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
 
 </Project>

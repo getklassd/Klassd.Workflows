@@ -17,8 +17,9 @@
     <ProjectReference Include="..\..\src\Klassd.Workflows.Storage.Postgres\Klassd.Workflows.Storage.Postgres.csproj" />
     <ProjectReference Include="..\..\src\Klassd.Workflows.Storage.MongoDb\Klassd.Workflows.Storage.MongoDb.csproj" />
     <ProjectReference Include="..\Klassd.Workflows.SampleJobs\Klassd.Workflows.SampleJobs.csproj" />
-    <!-- Build the worker so the local executor has a dll to launch (not linked into the host). -->
-    <ProjectReference Include="..\..\src\Klassd.Workflows.Worker\Klassd.Workflows.Worker.csproj"
+    <!-- Build the sample worker (worker host + the sample jobs) so the local executor has a dll to
+         launch (not linked into the host). -->
+    <ProjectReference Include="..\Klassd.Workflows.SampleWorker\Klassd.Workflows.SampleWorker.csproj"
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
 

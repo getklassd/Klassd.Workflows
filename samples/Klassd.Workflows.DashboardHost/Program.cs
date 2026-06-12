@@ -191,7 +191,7 @@ registry.Register(new WorkflowBuilder("cloud-sql-integration")
 
 app.Run();
 
-// Default worker dll path for the local executor: the Worker project's build output for the
+// Default worker dll path for the local executor: the sample worker's build output for the
 // current configuration. Override with Klassd.Workflows:WorkerDllPath.
 static string ResolveWorkerDllPath(WebApplicationBuilder builder)
 {
@@ -205,6 +205,6 @@ static string ResolveWorkerDllPath(WebApplicationBuilder builder)
     const string cfg = "Release";
 #endif
     return Path.GetFullPath(Path.Combine(
-        builder.Environment.ContentRootPath, "..", "..", "src", "Klassd.Workflows.Worker",
-        "bin", cfg, tfm, "Klassd.Workflows.Worker.dll"));
+        builder.Environment.ContentRootPath, "..", "Klassd.Workflows.SampleWorker",
+        "bin", cfg, tfm, "Klassd.Workflows.SampleWorker.dll"));
 }

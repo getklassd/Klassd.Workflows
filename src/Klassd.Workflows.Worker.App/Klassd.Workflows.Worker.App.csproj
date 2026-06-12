@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- The published base worker image; not a NuGet package. Consumers layer their job DLLs on top.
+         (Assembly name stays Klassd.Workflows.Worker.App so it doesn't collide with the Worker lib dll.) -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Klassd.Workflows.Worker\Klassd.Workflows.Worker.csproj" />
+    <!-- Bundle the object-storage artifact providers so they're available in the base image. -->
+    <ProjectReference Include="..\Klassd.Workflows.Artifacts.Gcs\Klassd.Workflows.Artifacts.Gcs.csproj" />
+    <ProjectReference Include="..\Klassd.Workflows.Artifacts.S3\Klassd.Workflows.Artifacts.S3.csproj" />
+  </ItemGroup>
+
+</Project>

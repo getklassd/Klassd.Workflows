@@ -2,6 +2,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/Klassd.Workflows.DashboardHost/Klassd.Workflows.DashboardHost.csproj" />
     <Project Path="samples/Klassd.Workflows.SampleJobs/Klassd.Workflows.SampleJobs.csproj" />
+    <Project Path="samples/Klassd.Workflows.SampleWorker/Klassd.Workflows.SampleWorker.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Klassd.Workflows.Abstractions/Klassd.Workflows.Abstractions.csproj" />
@@ -16,6 +17,7 @@
     <Project Path="src/Klassd.Workflows.Storage.Postgres/Klassd.Workflows.Storage.Postgres.csproj" />
     <Project Path="src/Klassd.Workflows.Storage.Sqlite/Klassd.Workflows.Storage.Sqlite.csproj" />
     <Project Path="src/Klassd.Workflows.Worker/Klassd.Workflows.Worker.csproj" />
+    <Project Path="src/Klassd.Workflows.Worker.App/Klassd.Workflows.Worker.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Klassd.Workflows.IntegrationTests/Klassd.Workflows.IntegrationTests.csproj" />
