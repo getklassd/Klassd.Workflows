@@ -251,6 +251,25 @@ public sealed class NodeBuilder
         return this;
     }
 
+    /// <summary>
+    /// Bind an argument to a service/container node's published <c>address</c> (<c>ip:port</c>) —
+    /// the Argo <c>{{tasks.x.address}}</c> pattern, without naming the output key. Also adds the
+    /// dependency so this node runs after the service is ready.
+    /// </summary>
+    public NodeBuilder BindServiceAddress(string argument, string serviceNode) =>
+        BindServiceOutput(argument, serviceNode, ServiceOutputs.Address);
+
+    /// <summary>Bind an argument to a service/container node's published <c>ip</c> (<c>{{tasks.x.ip}}</c>). Also adds the dependency.</summary>
+    public NodeBuilder BindServiceIp(string argument, string serviceNode) =>
+        BindServiceOutput(argument, serviceNode, ServiceOutputs.Ip);
+
+    private NodeBuilder BindServiceOutput(string argument, string serviceNode, string outputKey)
+    {
+        _bindings[argument] = $"{serviceNode}.{outputKey}";
+        if (!_deps.Contains(serviceNode)) _deps.Add(serviceNode);
+        return this;
+    }
+
     /// <summary>Fan out: one execution per element of sourceNode's JSON-array output.</summary>
     public NodeBuilder FanOutOver(string sourceNode, string outputKey, string itemArgument)
     {

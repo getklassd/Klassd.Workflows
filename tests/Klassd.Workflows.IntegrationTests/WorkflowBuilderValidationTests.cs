@@ -151,6 +151,21 @@ public class WorkflowBuilderValidationTests
     }
 
     [Test]
+    public async Task BindServiceAddress_binds_the_address_output_and_adds_the_dependency()
+    {
+        var def = new WorkflowBuilder("ok")
+            .AddContainer("proxy", "cloud-sql-proxy:2.11", c => c.AsService().ServicePort(5432))
+            .Add("cleanup", "Cleanup", n => n.BindServiceAddress("db_host", "proxy"))
+            .Build();
+
+        var cleanup = def.Node("cleanup")!;
+        // The dependency was added automatically (no separate DependsOn needed).
+        await Assert.That(cleanup.Dependencies).Contains("proxy");
+        // Binding resolves to the well-known "address" output without naming the string.
+        await Assert.That(cleanup.InputBindings["db_host"]).IsEqualTo("proxy.address");
+    }
+
+    [Test]
     public async Task Container_methods_rejected_on_job_node()
     {
         // ServicePort on a non-container node throws while configuring (inside Add).
