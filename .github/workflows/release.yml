@@ -2,11 +2,21 @@ name: Release
 
 # Push a tag like `v0.1.0-beta.1` to cut a release: the version is derived from
 # the tag, all packable src projects are packed, pushed to NuGet.org, and a
-# GitHub Release is created with the .nupkg/.snupkg attached.
+# GitHub Release is created with the .nupkg/.snupkg attached. In parallel the
+# Worker base image is built and pushed to GHCR (consumers layer their job DLLs
+# onto it, or build their own image with the Klassd.Workflows.Worker package).
 on:
   push:
     tags:
       - 'v*'
+  # Manual image-only run: dispatch on a branch with the version to (re)build and push
+  # the worker image for an already-published release without re-publishing NuGet packages.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to tag the worker image (e.g. 0.2.0-beta.1)'
+        required: true
+        type: string
 
 env:
   DOTNET_NOLOGO: true
@@ -19,6 +29,7 @@ concurrency:
 jobs:
   release:
     name: Pack + push to NuGet.org
+    if: github.event_name == 'push'    # tag push only; manual dispatch is image-only
     runs-on: ubuntu-latest
     permissions:
       contents: write        # create the GitHub Release
@@ -80,3 +91,45 @@ jobs:
           --generate-notes
           ${{ steps.version.outputs.prerelease == 'true' && '--prerelease' || '' }}
           artifacts/*.nupkg artifacts/*.snupkg
+
+  # The generic worker base image: the worker host with no jobs of its own.
+  # Consumers layer their published job DLLs onto it (FROM ghcr.io/getklassd/workflows-worker),
+  # or build their own image with the Klassd.Workflows.Worker package.
+  worker-image:
+    name: Build + push worker base image (GHCR)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # push to ghcr.io/getklassd/*
+    steps:
+      - uses: actions/checkout@v6
+
+      # Use the dispatch input when present, otherwise derive from the pushed tag.
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then VERSION="${GITHUB_REF_NAME#v}"; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # `:latest` tracks the most recent release (incl. betas) while in 0.x; pin to the
+      # version tag for reproducible builds. Single-arch (amd64) for now.
+      - name: Build + push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/Klassd.Workflows.Worker.App/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/getklassd/workflows-worker:${{ steps.version.outputs.version }}
+            ghcr.io/getklassd/workflows-worker:latest
