@@ -179,8 +179,11 @@ public static class WorkerHost
     /// <summary>
     /// Creates the job. If an <see cref="IWorkerStartup"/> is present on the load path, it composes a
     /// configuration + DI container so the job can take constructor dependencies; otherwise an empty
-    /// container is used. Either way the job is created with <see cref="ActivatorUtilities"/>, which
-    /// also handles a parameterless constructor — so jobs needing nothing keep working unchanged.
+    /// container is used. The job type can also define a per-job
+    /// <c>Configure(IServiceCollection, IConfiguration)</c> hook (static or instance with a
+    /// parameterless constructor), which is invoked on every execution — including workflow nodes.
+    /// Either way the job is created with <see cref="ActivatorUtilities"/>, which also handles a
+    /// parameterless constructor — so jobs needing nothing keep working unchanged.
     /// </summary>
     private static IJob CreateJob(Type type, TextWriter stdout)
     {
@@ -190,9 +193,48 @@ public static class WorkerHost
 
         var startup = DiscoverStartup(stdout);
         startup?.Configure(services, configuration);
+        InvokeJobConfigureHook(type, services, configuration, stdout);
 
         var provider = services.BuildServiceProvider();
         return (IJob)ActivatorUtilities.CreateInstance(provider, type);
+    }
+
+    internal static void InvokeJobConfigureHook(Type jobType, IServiceCollection services,
+        IConfiguration configuration, TextWriter stdout)
+    {
+        // Convention-based per-job startup hook:
+        //   public static void Configure(IServiceCollection, IConfiguration)
+        //   public        void Configure(IServiceCollection, IConfiguration) // requires parameterless ctor
+        var candidates = jobType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
+            .Where(m => m.Name == "Configure"
+                        && m.ReturnType == typeof(void)
+                        && m.GetParameters() is var p
+                        && p.Length == 2
+                        && p[0].ParameterType == typeof(IServiceCollection)
+                        && p[1].ParameterType == typeof(IConfiguration))
+            .ToList();
+
+        if (candidates.Count == 0) return;
+
+        var method = candidates.FirstOrDefault(m => m.IsStatic) ?? candidates[0];
+        if (candidates.Count > 1)
+            stdout.WriteLine($"{WorkerProtocol.LogPrefix} Multiple Configure(IServiceCollection, IConfiguration) methods found on {jobType.FullName}; using {method}.");
+
+        if (method.IsStatic)
+        {
+            method.Invoke(null, [services, configuration]);
+            return;
+        }
+
+        var ctor = jobType.GetConstructor(Type.EmptyTypes);
+        if (ctor is null)
+        {
+            stdout.WriteLine($"{WorkerProtocol.LogPrefix} {jobType.FullName} defines instance Configure(IServiceCollection, IConfiguration) but has no parameterless constructor; skipping per-job Configure hook.");
+            return;
+        }
+
+        var instance = Activator.CreateInstance(jobType)!;
+        method.Invoke(instance, [services, configuration]);
     }
 
     /// <summary>
