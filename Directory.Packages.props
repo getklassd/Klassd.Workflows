@@ -6,6 +6,9 @@
 
   <!-- Single source of truth for package versions across the solution (pinned). -->
   <ItemGroup>
+    <!-- Source generators -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+
     <!-- Extensions / framework abstractions -->
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.9" />

@@ -27,16 +27,29 @@ overview see the [README](../README.md); for the marketing/landing docs see
 **Behaviour:** your worker runs a known set of jobs, and those jobs take constructor dependencies
 (a typed client, options from config, a DB context).
 
-**What to write:** register the jobs on the worker with `RegisterJobs`, and the services they need
-with `ConfigureServices`. The worker constructs the dispatched job with `ActivatorUtilities`, so the
-registered services flow into its constructor. Put the registration in a shared method the
-**dashboard host also calls** (`AddJobs`), so both sides agree on the dispatch keys.
+**What to write:** each job declares its own dependencies by overriding the static `IJob.Configure`
+— co-located with the job, and run **only when that job is dispatched**, so a worker image hosting
+dozens of jobs never pays to register dependencies the invoked job doesn't use. Registration is then
+just `j.Add<MyJob>()`. Both halves are reflection-free: `Configure` is dispatched through the
+static-interface-member generic constraint (a compile-time virtual call), and the job is constructed by
+a source-generated `new MyJob(sp.GetRequiredService<…>())` factory (the Klassd.Workflows generator
+ships as an analyzer in `Klassd.Workflows.Abstractions`) — no `ActivatorUtilities`, trim/AOT-friendly.
+Reserve the worker-wide `ConfigureServices` for genuinely cross-cutting services (e.g. `HttpClient`)
+that every job shares; the generated factory pulls each constructor argument from the provider those
+callbacks populate. Put the registration in a shared method the **dashboard host also calls**
+(`AddJobs`), so both sides agree on the dispatch keys.
 
 ```csharp
 using Klassd.Workflows.Abstractions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 public sealed class SyncCatalogJob(IHttpClientFactory http, CatalogOptions opts) : IJob
 {
+    // This job's own dependency — registered only when SyncCatalogJob is the one dispatched.
+    public static void Configure(IServiceCollection services, IConfiguration config) =>
+        services.AddSingleton(new CatalogOptions { BaseUrl = config["Catalog:BaseUrl"]! });
+
     public async Task RunAsync(IJobContext ctx) { /* use http, opts */ }
 }
 
@@ -47,6 +60,9 @@ public sealed class GreetingOptions
 
 public sealed class ConfiguredGreetingJob(GreetingOptions options) : IJob
 {
+    public static void Configure(IServiceCollection services, IConfiguration config) =>
+        services.AddSingleton(new GreetingOptions { Salutation = config["Greeting:Salutation"] ?? "Hello" });
+
     public Task RunAsync(IJobContext context)
     {
         var name = context.Arguments.GetValueOrDefault("name", "world");
@@ -56,10 +72,11 @@ public sealed class ConfiguredGreetingJob(GreetingOptions options) : IJob
 }
 
 // The shared registration — referenced by both the worker exe and the dashboard host.
+// Each job's Configure is picked up automatically; nothing to wire here.
 public static class MyJobs
 {
     public static void Register(JobRegistrationBuilder j) => j
-        .Add<SyncCatalogJob>()                 // key defaults to the full type name
+        .Add<SyncCatalogJob>()
         .Add<ConfiguredGreetingJob>();
 }
 ```
@@ -67,13 +84,8 @@ public static class MyJobs
 ```csharp
 // The worker exe (Program.cs):
 return await WorkerHost.CreateBuilder(args)
-    .ConfigureServices((services, config) =>
-    {
-        services.AddHttpClient();
-        services.AddSingleton(new CatalogOptions { BaseUrl = config["Catalog:BaseUrl"]! });
-        services.AddSingleton(new GreetingOptions { Salutation = config["Greeting:Salutation"] ?? "Hello" });
-    })
-    .RegisterJobs(MyJobs.Register)
+    .ConfigureServices((services, config) => services.AddHttpClient())  // cross-cutting only
+    .RegisterJobs(MyJobs.Register)                                      // per-job deps live here
     .RunAsync();
 ```
 
@@ -90,12 +102,21 @@ Set option values from any [configuration source](#where-configuration-comes-fro
 - **Keys default to the full type name**, matching what `EnqueueAsync<T>()`, recurring jobs and
   workflow nodes emit — so `j.Add<MyJob>()` "just works" with the rest of the API. Pass an explicit
   key (`j.Add<MyJob>("my-key")`) only if you want a stable key decoupled from the type name.
+- **Construction is source-generated, not reflective.** `j.Add<MyJob>()` uses a compile-time
+  `new MyJob(sp.GetRequiredService<…>())` factory the generator emits for every `IJob` (greediest
+  public constructor, each argument resolved from the provider). The generator ships as an analyzer in
+  the `Klassd.Workflows.Abstractions` NuGet, so it just works for consumers; if you reference the
+  projects in-source instead, add the generator as an `OutputItemType="Analyzer"` reference. If no
+  factory was generated for a type, `Add<T>()` throws and points you at the fix.
 - **Need bespoke construction?** Use the factory overload:
-  `j.Add("report", sp => new ReportJob(sp.GetRequiredService<IFoo>()))`. A factory returning a
-  concrete `IJob` still records the type for the catalog; type it as `Func<IServiceProvider, IJob>`
-  to register without type metadata.
-- **`ConfigureServices` runs once** at worker startup (a worker process runs exactly one job), so
-  it's effectively per-job — register everything any registered job might need.
+  `j.Add("report", sp => new ReportJob(sp.GetRequiredService<IFoo>()))` — it bypasses the generated
+  factory entirely. A factory returning a concrete `IJob` still records the type for the catalog; type
+  it as `Func<IServiceProvider, IJob>` to register without type metadata.
+- **Per-job DI runs only for the dispatched job.** A worker process runs exactly one job, so only the
+  matched job's `Configure` executes — declare each job's dependencies on its own `Configure` and jobs
+  that aren't invoked cost nothing. The worker-wide `ConfigureServices` runs first (for the
+  cross-cutting services every job shares), then the job's `Configure`, then an optional call-site
+  `configure:` argument on `Add<T>(...)`; all three feed the same provider the job is built from.
 - `ConfiguredGreetingJob` is the working `samples/Klassd.Workflows.SampleJobs/ConfiguredGreetingJob.cs`
   — run it from the dashboard and pass `name` as a `[JobInput]`.
 

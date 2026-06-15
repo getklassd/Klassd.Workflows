@@ -171,9 +171,12 @@ public static class WorkerHost
 
     /// <summary>
     /// Looks the dispatch key up in the registry and constructs the job from a fresh service provider.
-    /// The <c>ConfigureServices</c> callbacks register the dependencies; the registration's factory
-    /// (<see cref="ActivatorUtilities"/> for <c>Add&lt;T&gt;()</c>, or a user-supplied lambda) builds
-    /// the instance. Throws if no job is registered under the key.
+    /// Worker-wide <paramref name="configureServices"/> callbacks register cross-cutting dependencies;
+    /// the matched registration's own <see cref="JobRegistration.ConfigureServices"/> then registers
+    /// just that job's dependencies — and because a pod runs only the dispatched job, no other job's
+    /// services are ever built. The registration's factory (<see cref="ActivatorUtilities"/> for
+    /// <c>Add&lt;T&gt;()</c>, or a user-supplied lambda) builds the instance. Throws if no job is
+    /// registered under the key.
     /// </summary>
     private static IJob CreateJob(IJobRegistry registry, string key,
         IReadOnlyList<Action<IServiceCollection, IConfiguration>> configureServices)
@@ -187,6 +190,7 @@ public static class WorkerHost
         var services = new ServiceCollection();
         services.AddSingleton(configuration);
         foreach (var configure in configureServices) configure(services, configuration);
+        registration.ConfigureServices?.Invoke(services, configuration);
 
         var provider = services.BuildServiceProvider();
         return registration.Factory(provider);

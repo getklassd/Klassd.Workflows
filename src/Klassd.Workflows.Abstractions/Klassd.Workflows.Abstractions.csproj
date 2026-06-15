@@ -7,8 +7,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- ActivatorUtilities backs JobRegistrationBuilder.Add&lt;T&gt;() constructor injection. -->
+    <!-- IServiceProvider/IServiceCollection (registration API) and GetRequiredService in generated factories. -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <!-- IConfiguration in the per-job ConfigureServices callback. -->
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+  </ItemGroup>
+
+  <!-- The job-factory source generator: a build-time analyzer for this project, and packed into the
+       NuGet under analyzers/ so consumers' jobs get reflection-free factories too. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Klassd.Workflows.Generators\Klassd.Workflows.Generators.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <None Include="..\Klassd.Workflows.Generators\bin\$(Configuration)\netstandard2.0\Klassd.Workflows.Generators.dll"
+          Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
 
 </Project>

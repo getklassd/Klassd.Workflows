@@ -23,5 +23,8 @@
     <ProjectReference Include="..\..\src\Klassd.Workflows.Worker\Klassd.Workflows.Worker.csproj" />
     <!-- For typeof(HelloWorldJob).FullName — the job itself runs inside the worker image. -->
     <ProjectReference Include="..\..\samples\Klassd.Workflows.SampleJobs\Klassd.Workflows.SampleJobs.csproj" />
+    <!-- The job-factory generator, for the test's own IJob types (see note in SampleJobs.csproj). -->
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Generators\Klassd.Workflows.Generators.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>
