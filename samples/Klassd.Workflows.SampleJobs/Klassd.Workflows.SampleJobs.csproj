@@ -4,6 +4,11 @@
        dashboard host. JobRegistrationBuilder lives in Klassd.Workflows.Abstractions. -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
+    <!-- The job-factory generator. NuGet consumers get this automatically (it's packed into the
+         Abstractions package); in-repo it doesn't flow through the ProjectReference, so jobs-defining
+         projects reference it directly. -->
+    <ProjectReference Include="..\..\src\Klassd.Workflows.Generators\Klassd.Workflows.Generators.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

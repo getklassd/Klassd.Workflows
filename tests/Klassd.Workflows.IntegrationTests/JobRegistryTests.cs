@@ -1,5 +1,6 @@
 using Klassd.Workflows.Abstractions;
 using Klassd.Workflows.Core.Execution;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Klassd.Workflows.IntegrationTests;
@@ -72,6 +73,42 @@ public class JobRegistryTests
     }
 
     [Test]
+    public async Task Static_Configure_registers_the_jobs_own_dependencies()
+    {
+        // SelfConfiguringJob declares its dependency via the static IJob.Configure — wired by Add<T>()
+        // with no call-site callback, no reflection. Mirrors WorkerHost.CreateJob: run the matched
+        // registration's ConfigureServices, build the provider, construct the job.
+        var registry = JobRegistry.Build(j => j.Add<SelfConfiguringJob>("self"));
+
+        var job = (SelfConfiguringJob)BuildJob(registry, "self");
+
+        await Assert.That(job.Marker.Value).IsEqualTo("from-static-configure");
+    }
+
+    [Test]
+    public async Task Per_job_configure_registers_only_that_jobs_dependencies()
+    {
+        // Two registrations of the same job type, each contributing its OWN marker. Only the matched
+        // registration's ConfigureServices runs, so 'a' must NOT see 'b's dependency, and vice versa.
+        var registry = JobRegistry.Build(j =>
+        {
+            j.Add<DependentJob>("a", configure: (svc, _) => svc.AddSingleton(new Marker { Value = "a-only" }));
+            j.Add<DependentJob>("b", configure: (svc, _) => svc.AddSingleton(new Marker { Value = "b-only" }));
+        });
+
+        await Assert.That(((DependentJob)BuildJob(registry, "a")).Marker.Value).IsEqualTo("a-only");
+        await Assert.That(((DependentJob)BuildJob(registry, "b")).Marker.Value).IsEqualTo("b-only");
+    }
+
+    private static IJob BuildJob(IJobRegistry registry, string key)
+    {
+        registry.TryGet(key, out var reg);
+        var services = new ServiceCollection();
+        reg.ConfigureServices?.Invoke(services, new ConfigurationBuilder().Build());
+        return reg.Factory(services.BuildServiceProvider());
+    }
+
+    [Test]
     public async Task TryGet_returns_false_for_unknown_key()
     {
         var registry = JobRegistry.Build(j => j.Add<PlainJob>("known"));
@@ -108,6 +145,16 @@ public class JobRegistryTests
     public sealed class DependentJob(JobRegistryTests.Marker marker) : IJob
     {
         public Marker Marker { get; } = marker;
+
+        public Task RunAsync(IJobContext context) => Task.CompletedTask;
+    }
+
+    public sealed class SelfConfiguringJob(JobRegistryTests.Marker marker) : IJob
+    {
+        public Marker Marker { get; } = marker;
+
+        public static void Configure(IServiceCollection services, IConfiguration configuration) =>
+            services.AddSingleton(new Marker { Value = "from-static-configure" });
 
         public Task RunAsync(IJobContext context) => Task.CompletedTask;
     }

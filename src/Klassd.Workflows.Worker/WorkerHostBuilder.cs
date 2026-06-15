@@ -9,15 +9,18 @@ namespace Klassd.Workflows.Worker;
 /// (plus any services they depend on), and call <see cref="RunAsync"/>:
 /// <code>
 /// return await WorkerHost.CreateBuilder(args)
-///     .ConfigureServices((svc, cfg) => svc.AddHttpClient())
+///     .ConfigureServices((svc, cfg) => svc.AddHttpClient())   // cross-cutting: shared by every job
 ///     .RegisterJobs(j =>
 ///     {
 ///         j.Add&lt;GreetingJob&gt;();                 // key defaults to the full type name
-///         j.Add&lt;EmailJob&gt;("send-email");         // explicit key
+///         j.Add&lt;EmailJob&gt;("send-email",          // explicit key + this job's OWN dependencies
+///             configure: (svc, cfg) => svc.AddSingleton&lt;ISmtp&gt;(_ => new Smtp(cfg["Smtp:Host"])));
 ///         j.Add("report", sp => new ReportJob(sp.GetRequiredService&lt;IFoo&gt;())); // explicit factory
 ///     })
 ///     .RunAsync();
 /// </code>
+/// Per-job <c>configure</c> callbacks run only when that job is the one dispatched, so a worker image
+/// can host many jobs without every pod paying to register dependencies it won't use.
 /// Publishing that exe yields your worker image. The scheduler launches it once per job, passing the
 /// dispatch key in the environment; the worker constructs the matching registered job and runs it.
 /// </summary>
