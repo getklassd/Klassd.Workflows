@@ -4,4 +4,10 @@
     <ProjectReference Include="..\..\src\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- For the per-job Configure(IServiceCollection, IConfiguration) hook (see ConfiguredGreetingJob). -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+  </ItemGroup>
+
 </Project>

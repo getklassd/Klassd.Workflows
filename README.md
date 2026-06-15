@@ -146,7 +146,7 @@ code, now one pod per execution.
 | `Klassd.Workflows.Abstractions` | The contract jobs implement: `IJob`, `IJobContext`, and the worker stdout protocol. |
 | `Klassd.Workflows.Core` | Scheduler, in-memory store, cron recurring loop (Cronos), job catalog, and the **local-process executor**. |
 | `Klassd.Workflows.Kubernetes` | `KubernetesJobExecutor` — creates a K8s `Job` per run and tails the pod logs. |
-| `Klassd.Workflows.Worker` | The executor-pod entrypoint, packaged. `WorkerHost.RunAsync()` loads the `IJob` by name, runs it, streams log/progress/state to stdout. Optional `IWorkerStartup` adds DI. |
+| `Klassd.Workflows.Worker` | The executor-pod entrypoint, packaged. `WorkerHost.RunAsync()` loads the `IJob` by name, runs it, streams log/progress/state to stdout. Optional `IWorkerStartup` adds global DI, and a job type can define `Configure(IServiceCollection, IConfiguration)` for per-execution DI setup. |
 | `Klassd.Workflows.Dashboard` | Blazor Server UI: live job list, per-job console + progress, recurring jobs, DAG runs. Hosts the scheduler. |
 | `Klassd.Workflows.Storage.Postgres` | Durable `IJobStore` on PostgreSQL (jsonb documents + append-only logs). |
 | `Klassd.Workflows.Storage.MongoDb` | Durable `IJobStore` on MongoDB. |

@@ -16,4 +16,8 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Klassd.Workflows.IntegrationTests" />
+  </ItemGroup>
+
 </Project>
