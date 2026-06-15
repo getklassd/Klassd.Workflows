@@ -8,6 +8,10 @@ recurring jobs are registered through code with cron expressions.
 > ⚠️ **Beta.** Klassd.Workflows is in public beta (`0.x`). It works and is tested, but the API
 > surface may change between releases until `1.0`. Pin your versions when upgrading.
 
+> 📖 **Recipes.** Looking for *"I want behaviour X — what do I write?"* See
+> [`docs/recipes.md`](docs/recipes.md): per-execution & global DI, inputs, progress, output/artifact
+> passing, fan-out, conditions, retries, container/service nodes, scheduling, resources, cancellation.
+
 ## Yes — and it's already running
 
 This repo is a working skeleton. Out of the box it runs jobs as **local
@@ -407,7 +411,11 @@ COPY ./my-published-jobs/ /app/        # the worker loads every assembly in /app
 Jobs are created via `ActivatorUtilities`, so they can take constructor dependencies — implement
 `IWorkerStartup` in (or beside) your job assembly to register services and the worker discovers it
 automatically, composing configuration from `appsettings[.{ENV}].json`, `/secrets/*.json`, then
-environment variables. Jobs with a parameterless constructor need no startup class.
+environment variables. A single job can instead register its own per-execution dependencies with a
+`Configure(IServiceCollection, IConfiguration)` method (static, or instance with a parameterless
+ctor) — discovered by signature, called on every run including workflow nodes. Jobs with a
+parameterless constructor need neither. See [`docs/recipes.md`](docs/recipes.md#give-a-job-dependencies-per-execution-di)
+for worked examples.
 
 ## Run on Kubernetes
 
