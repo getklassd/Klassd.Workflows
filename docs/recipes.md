@@ -5,8 +5,7 @@ public API (`IJob`, `IJobContext`, `WorkflowBuilder`, `IJobScheduler`). For the 
 overview see the [README](../README.md); for the marketing/landing docs see
 [getklassd.com/workflows/docs](https://getklassd.com/workflows/docs).
 
-- [Give a job dependencies (per-execution DI)](#give-a-job-dependencies-per-execution-di)
-- [Give every job the same dependencies (global DI)](#give-every-job-the-same-dependencies-global-di)
+- [Register jobs and give them dependencies (DI)](#register-jobs-and-give-them-dependencies-di)
 - [Where configuration comes from](#where-configuration-comes-from)
 - [Accept manual-start inputs](#accept-manual-start-inputs)
 - [Log and report progress](#log-and-report-progress)
@@ -23,114 +22,87 @@ overview see the [README](../README.md); for the marketing/landing docs see
 
 ---
 
-## Give a job dependencies (per-execution DI)
+## Register jobs and give them dependencies (DI)
 
-**Behaviour:** one job needs its own services (a typed client, options from config, a DB context)
-without forcing a global startup class on the whole worker.
+**Behaviour:** your worker runs a known set of jobs, and those jobs take constructor dependencies
+(a typed client, options from config, a DB context).
 
-**What to write:** add a `Configure(IServiceCollection, IConfiguration)` method to the job. The
-worker discovers it *by name and signature* — there is no interface to implement — and calls it on
-**every execution**, including when the job runs as a workflow node. Jobs are then created with
-`ActivatorUtilities`, so the registered services flow into the constructor.
+**What to write:** register the jobs on the worker with `RegisterJobs`, and the services they need
+with `ConfigureServices`. The worker constructs the dispatched job with `ActivatorUtilities`, so the
+registered services flow into its constructor. Put the registration in a shared method the
+**dashboard host also calls** (`AddJobs`), so both sides agree on the dispatch keys.
 
 ```csharp
 using Klassd.Workflows.Abstractions;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 
-public sealed class ConfiguredGreetingJob : IJob
+public sealed class SyncCatalogJob(IHttpClientFactory http, CatalogOptions opts) : IJob
 {
-    private readonly GreetingOptions _options;
-
-    // A parameterless ctor is required when Configure is an *instance* method, so the worker can
-    // create the type to invoke the hook. ActivatorUtilities then re-creates it with the dependency.
-    public ConfiguredGreetingJob() => _options = new GreetingOptions();
-
-    public ConfiguredGreetingJob(GreetingOptions options) => _options = options;
-
-    // Convention hook — discovered by name/signature, no interface to implement.
-    public void Configure(IServiceCollection services, IConfiguration configuration)
-    {
-        var salutation = configuration["Greeting:Salutation"] ?? "Hello";
-        services.AddSingleton(new GreetingOptions { Salutation = salutation });
-    }
-
-    public Task RunAsync(IJobContext context)
-    {
-        var name = context.Arguments.GetValueOrDefault("name", "world");
-        context.Log($"{_options.Salutation}, {name}!");
-        return Task.CompletedTask;
-    }
+    public async Task RunAsync(IJobContext ctx) { /* use http, opts */ }
 }
 
 public sealed class GreetingOptions
 {
     public string Salutation { get; init; } = "Hello";
 }
+
+public sealed class ConfiguredGreetingJob(GreetingOptions options) : IJob
+{
+    public Task RunAsync(IJobContext context)
+    {
+        var name = context.Arguments.GetValueOrDefault("name", "world");
+        context.Log($"{options.Salutation}, {name}!");
+        return Task.CompletedTask;
+    }
+}
+
+// The shared registration — referenced by both the worker exe and the dashboard host.
+public static class MyJobs
+{
+    public static void Register(JobRegistrationBuilder j) => j
+        .Add<SyncCatalogJob>()                 // key defaults to the full type name
+        .Add<ConfiguredGreetingJob>();
+}
 ```
 
-Set the value from any [configuration source](#where-configuration-comes-from), e.g. the env var
+```csharp
+// The worker exe (Program.cs):
+return await WorkerHost.CreateBuilder(args)
+    .ConfigureServices((services, config) =>
+    {
+        services.AddHttpClient();
+        services.AddSingleton(new CatalogOptions { BaseUrl = config["Catalog:BaseUrl"]! });
+        services.AddSingleton(new GreetingOptions { Salutation = config["Greeting:Salutation"] ?? "Hello" });
+    })
+    .RegisterJobs(MyJobs.Register)
+    .RunAsync();
+```
+
+```csharp
+// The dashboard host — register the same jobs so the catalog/workflow validation match:
+builder.Services.AddKlassdWorkflowsCore().AddJobs(MyJobs.Register);
+```
+
+Set option values from any [configuration source](#where-configuration-comes-from), e.g. the env var
 `Greeting__Salutation=Hej`, and the job picks it up — no recompile.
 
 **Notes & gotchas:**
 
-- **`static` is simpler.** If the hook doesn't need an instance, make it
-  `public static void Configure(...)`. Then **no parameterless constructor is needed** — the worker
-  invokes it without creating the type first. Prefer this unless you have a reason not to.
-  ```csharp
-  public static void Configure(IServiceCollection services, IConfiguration configuration)
-      => services.AddSingleton(new GreetingOptions { Salutation = configuration["Greeting:Salutation"] ?? "Hello" });
-  ```
-- An **instance** hook without a parameterless ctor is **skipped** (the worker logs a `##LOG##`
-  line and falls back) — it can't create the type to call the method. Use `static`, or add the ctor.
-- If both a static and an instance `Configure` are present the **static one wins** (and a log line
-  notes it). Don't define both.
-- This runs **after** any global [`IWorkerStartup`](#give-every-job-the-same-dependencies-global-di),
-  so a job can override or augment what the startup registered.
-- This is the working `samples/Klassd.Workflows.SampleJobs/ConfiguredGreetingJob.cs` — run it from
-  the dashboard and pass `name` as a `[JobInput]`.
-
-## Give every job the same dependencies (global DI)
-
-**Behaviour:** all jobs in the image share an `HttpClient`, a logger config, a DB connection, etc.
-
-**What to write:** implement `IWorkerStartup` anywhere in (or beside) your job assembly. The worker
-finds the single implementation on its load path automatically — no registration call — instantiates
-it with its parameterless ctor, and calls `Configure` once to build the container that every job is
-resolved from.
-
-```csharp
-using Klassd.Workflows.Worker;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-
-public sealed class WorkerStartup : IWorkerStartup
-{
-    public void Configure(IServiceCollection services, IConfiguration configuration)
-    {
-        services.AddHttpClient();
-        services.AddSingleton(new CatalogOptions { BaseUrl = configuration["Catalog:BaseUrl"]! });
-        // ...register whatever your jobs take as constructor parameters
-    }
-}
-```
-
-Jobs then just declare what they need:
-
-```csharp
-public sealed class SyncCatalogJob(IHttpClientFactory http, CatalogOptions opts) : IJob
-{
-    public async Task RunAsync(IJobContext ctx) { /* use http, opts */ }
-}
-```
-
-Exactly one `IWorkerStartup` is expected. Use the [per-job `Configure`](#give-a-job-dependencies-per-execution-di)
-hook for things only one job needs. Jobs with a parameterless constructor need neither.
+- **Keys default to the full type name**, matching what `EnqueueAsync<T>()`, recurring jobs and
+  workflow nodes emit — so `j.Add<MyJob>()` "just works" with the rest of the API. Pass an explicit
+  key (`j.Add<MyJob>("my-key")`) only if you want a stable key decoupled from the type name.
+- **Need bespoke construction?** Use the factory overload:
+  `j.Add("report", sp => new ReportJob(sp.GetRequiredService<IFoo>()))`. A factory returning a
+  concrete `IJob` still records the type for the catalog; type it as `Func<IServiceProvider, IJob>`
+  to register without type metadata.
+- **`ConfigureServices` runs once** at worker startup (a worker process runs exactly one job), so
+  it's effectively per-job — register everything any registered job might need.
+- `ConfiguredGreetingJob` is the working `samples/Klassd.Workflows.SampleJobs/ConfiguredGreetingJob.cs`
+  — run it from the dashboard and pass `name` as a `[JobInput]`.
 
 ## Where configuration comes from
 
-The `IConfiguration` handed to both DI hooks (and resolvable in any job, since the worker registers
-it as a singleton) is composed in this order — **last source wins**:
+The `IConfiguration` handed to `ConfigureServices` (and resolvable in any job, since the worker
+registers it as a singleton) is composed in this order — **last source wins**:
 
 1. `appsettings.json`
 2. `appsettings.{ENV}.json` (where `ENV` = `DOTNET_ENVIRONMENT` or `ASPNETCORE_ENVIRONMENT`)

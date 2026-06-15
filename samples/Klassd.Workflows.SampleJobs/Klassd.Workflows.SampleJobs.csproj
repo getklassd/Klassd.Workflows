@@ -1,13 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Job classes plus the shared SampleJobsRegistration, referenced by both the worker and the
+       dashboard host. JobRegistrationBuilder lives in Klassd.Workflows.Abstractions. -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Klassd.Workflows.Abstractions\Klassd.Workflows.Abstractions.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- For the per-job Configure(IServiceCollection, IConfiguration) hook (see ConfiguredGreetingJob). -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
   </ItemGroup>
 
 </Project>

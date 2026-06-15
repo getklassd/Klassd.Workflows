@@ -1,37 +1,21 @@
-using System.Reflection;
 using Klassd.Workflows.Abstractions;
 
 namespace Klassd.Workflows.Core.Storage;
 
 /// <summary>
-/// Selects an <see cref="IArtifactStoreProvider"/> by name from all providers in
-/// the loaded assemblies (same discovery approach as jobs), then builds the
-/// store. Used by the worker so artifact backends are pluggable: reference an
-/// assembly containing a provider and select it by name — no worker changes.
+/// Selects an <see cref="IArtifactStoreProvider"/> by name from the set the worker registered
+/// (plus the built-in "file" fallback), then builds the store. Artifact backends are pluggable by
+/// registering a provider on the worker (<c>AddArtifactProvider</c>) and selecting it by name via
+/// config — no worker changes.
 /// </summary>
 public static class ArtifactStoreResolver
 {
-    public static IReadOnlyList<IArtifactStoreProvider> DiscoverProviders()
+    public static IArtifactStore Resolve(string providerName, IReadOnlyDictionary<string, string> settings,
+        IEnumerable<IArtifactStoreProvider> providers)
     {
-        var iface = typeof(IArtifactStoreProvider);
-        return AppDomain.CurrentDomain.GetAssemblies()
-            .SelectMany(SafeGetTypes)
-            .Where(t => t is { IsClass: true, IsAbstract: false } && iface.IsAssignableFrom(t))
-            .Select(t => (IArtifactStoreProvider)Activator.CreateInstance(t)!)
-            .ToList();
-    }
-
-    public static IArtifactStore Resolve(string providerName, IReadOnlyDictionary<string, string> settings)
-    {
-        var provider = DiscoverProviders()
+        var provider = providers
             .FirstOrDefault(p => string.Equals(p.Name, providerName, StringComparison.OrdinalIgnoreCase))
             ?? new FileSystemArtifactStoreProvider();
         return provider.Create(settings);
-    }
-
-    private static IEnumerable<Type> SafeGetTypes(Assembly a)
-    {
-        try { return a.GetTypes(); }
-        catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t is not null)!; }
     }
 }

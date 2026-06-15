@@ -1,6 +1,4 @@
-using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Runtime.Loader;
 using System.Text.Json;
 using Klassd.Workflows.Abstractions;
 using Klassd.Workflows.Core.Model;
@@ -11,21 +9,27 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Klassd.Workflows.Worker;
 
 /// <summary>
-/// The executor-pod entry point, packaged so you can build your own worker image: reference this
-/// package plus your job assemblies from a one-line exe (<c>return await WorkerHost.RunAsync(args);</c>)
-/// and publish it, or layer your job DLLs onto the published base image. It reads the job descriptor
-/// from environment variables (<see cref="WorkerProtocol"/>), loads the requested <see cref="IJob"/>
-/// from the assemblies on its load path, runs it, and reports outcome via the stdout protocol the
-/// scheduler tails.
+/// The executor-pod entry point. Build a worker with <see cref="CreateBuilder"/>: reference this
+/// package from a thin exe, register the jobs it can run, and publish it as your worker image. It
+/// reads the job descriptor from environment variables (<see cref="WorkerProtocol"/>), constructs the
+/// requested <see cref="IJob"/> from the registry, runs it, and reports outcome via the stdout
+/// protocol the scheduler tails.
 /// </summary>
 public static class WorkerHost
 {
+    /// <summary>Start building a worker. See <see cref="WorkerHostBuilder"/> for the fluent API.</summary>
+    public static WorkerHostBuilder CreateBuilder(string[]? args = null) => new(args ?? []);
+
     /// <summary>
     /// Runs the single job described by the environment and returns a process exit code
     /// (0 success, 1 failure, 2 cancelled). <paramref name="args"/> is currently unused — the job
     /// descriptor travels in env vars — but is accepted so callers can forward <c>Main</c>'s args.
     /// </summary>
-    public static async Task<int> RunAsync(string[]? args = null)
+    internal static async Task<int> RunAsync(
+        string[]? args,
+        IReadOnlyList<Action<IServiceCollection, IConfiguration>> configureServices,
+        IJobRegistry registry,
+        IReadOnlyList<IArtifactStoreProvider> artifactProviders)
     {
         var stdout = Console.Out;
 
@@ -36,7 +40,7 @@ public static class WorkerHost
 
         string jobId = Environment.GetEnvironmentVariable(WorkerProtocol.EnvJobId) ?? "unknown";
         string jobName = Environment.GetEnvironmentVariable(WorkerProtocol.EnvJobName) ?? "unknown";
-        string? jobType = Environment.GetEnvironmentVariable(WorkerProtocol.EnvJobType);
+        string? jobKey = Environment.GetEnvironmentVariable(WorkerProtocol.EnvJobType);
         string argsJson = Environment.GetEnvironmentVariable(WorkerProtocol.EnvJobArgs) ?? "{}";
 
         void Fail(string message)
@@ -45,7 +49,7 @@ public static class WorkerHost
             stdout.Flush();
         }
 
-        if (string.IsNullOrWhiteSpace(jobType))
+        if (string.IsNullOrWhiteSpace(jobKey))
         {
             Fail($"No {WorkerProtocol.EnvJobType} provided.");
             return 1;
@@ -53,25 +57,14 @@ public static class WorkerHost
 
         var jobArgs = JsonSerializer.Deserialize<Dictionary<string, string>>(argsJson) ?? new();
 
-        // Make sure job assemblies sitting next to the worker are loaded so the type (and any
-        // IWorkerStartup / IArtifactStoreProvider) resolves.
-        LoadAssembliesInBaseDirectory();
-
-        var type = ResolveType(jobType);
-        if (type is null)
-        {
-            Fail($"Job type '{jobType}' not found in loaded assemblies.");
-            return 1;
-        }
-
         IJob job;
         try
         {
-            job = CreateJob(type, stdout);
+            job = CreateJob(registry, jobKey, configureServices);
         }
         catch (Exception ex)
         {
-            Fail($"Could not create job '{jobType}': {ex.Message}");
+            Fail($"Could not create job '{jobKey}': {ex.Message}");
             return 1;
         }
 
@@ -84,9 +77,9 @@ public static class WorkerHost
             SafeCancel(cts);
         });
 
-        // Resolve the artifact store from the configured provider (file | gcs | s3 | any
-        // IArtifactStoreProvider on the load path). Providers are discovered from the assemblies
-        // next to the worker — adding a backend needs no worker changes.
+        // Resolve the artifact store from the configured provider name (file | gcs | s3 | …),
+        // selecting from the providers this worker registered via AddArtifactProvider. The built-in
+        // "file" provider is always available as the fallback.
         var artifactProvider = Environment.GetEnvironmentVariable(WorkerProtocol.EnvArtifactProvider) ?? "file";
         var artifactSettings = JsonSerializer.Deserialize<Dictionary<string, string>>(
             Environment.GetEnvironmentVariable(WorkerProtocol.EnvArtifactSettings) ?? "{}") ?? new();
@@ -95,7 +88,7 @@ public static class WorkerHost
             Environment.GetEnvironmentVariable(WorkerProtocol.EnvArtifactDir) is { } legacyDir)
             artifactSettings["dir"] = legacyDir;
 
-        var artifacts = ArtifactStoreResolver.Resolve(artifactProvider, artifactSettings);
+        var artifacts = ArtifactStoreResolver.Resolve(artifactProvider, artifactSettings, artifactProviders);
 
         // The pod's own IP (downward API in K8s); empty locally, where 127.0.0.1 is the right address.
         var podIp = Environment.GetEnvironmentVariable(WorkerProtocol.EnvPodIp);
@@ -105,7 +98,7 @@ public static class WorkerHost
 
         try
         {
-            context.Log($"Starting {jobName} ({jobType})");
+            context.Log($"Starting {jobName} ({jobKey})");
             await job.RunAsync(context);
             // Declarative file outputs: read the files the job wrote (or fall back to defaults) and
             // publish them as node outputs, before reporting success.
@@ -177,64 +170,26 @@ public static class WorkerHost
     }
 
     /// <summary>
-    /// Creates the job. If an <see cref="IWorkerStartup"/> is present on the load path, it composes a
-    /// configuration + DI container so the job can take constructor dependencies; otherwise an empty
-    /// container is used. The job type can also define a per-job
-    /// <c>Configure(IServiceCollection, IConfiguration)</c> hook (static or instance with a
-    /// parameterless constructor), which is invoked on every execution — including workflow nodes.
-    /// Either way the job is created with <see cref="ActivatorUtilities"/>, which also handles a
-    /// parameterless constructor — so jobs needing nothing keep working unchanged.
+    /// Looks the dispatch key up in the registry and constructs the job from a fresh service provider.
+    /// The <c>ConfigureServices</c> callbacks register the dependencies; the registration's factory
+    /// (<see cref="ActivatorUtilities"/> for <c>Add&lt;T&gt;()</c>, or a user-supplied lambda) builds
+    /// the instance. Throws if no job is registered under the key.
     /// </summary>
-    private static IJob CreateJob(Type type, TextWriter stdout)
+    private static IJob CreateJob(IJobRegistry registry, string key,
+        IReadOnlyList<Action<IServiceCollection, IConfiguration>> configureServices)
     {
+        if (!registry.TryGet(key, out var registration))
+            throw new InvalidOperationException(
+                $"No job registered for key '{key}'. Registered keys: " +
+                $"{string.Join(", ", registry.Registrations.Select(r => r.Key))}.");
+
         var configuration = BuildConfiguration();
         var services = new ServiceCollection();
         services.AddSingleton(configuration);
-
-        var startup = DiscoverStartup(stdout);
-        startup?.Configure(services, configuration);
-        InvokeJobConfigureHook(type, services, configuration, stdout);
+        foreach (var configure in configureServices) configure(services, configuration);
 
         var provider = services.BuildServiceProvider();
-        return (IJob)ActivatorUtilities.CreateInstance(provider, type);
-    }
-
-    internal static void InvokeJobConfigureHook(Type jobType, IServiceCollection services,
-        IConfiguration configuration, TextWriter stdout)
-    {
-        // Convention-based per-job startup hook:
-        //   public static void Configure(IServiceCollection, IConfiguration)
-        //   public        void Configure(IServiceCollection, IConfiguration) // requires parameterless ctor
-        var candidates = jobType.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
-            .Where(m => m.Name == "Configure"
-                        && m.ReturnType == typeof(void)
-                        && m.GetParameters() is var p
-                        && p.Length == 2
-                        && p[0].ParameterType == typeof(IServiceCollection)
-                        && p[1].ParameterType == typeof(IConfiguration))
-            .ToList();
-
-        if (candidates.Count == 0) return;
-
-        var method = candidates.FirstOrDefault(m => m.IsStatic) ?? candidates[0];
-        if (candidates.Count > 1)
-            stdout.WriteLine($"{WorkerProtocol.LogPrefix} Multiple Configure(IServiceCollection, IConfiguration) methods found on {jobType.FullName}; using {method}.");
-
-        if (method.IsStatic)
-        {
-            method.Invoke(null, [services, configuration]);
-            return;
-        }
-
-        var ctor = jobType.GetConstructor(Type.EmptyTypes);
-        if (ctor is null)
-        {
-            stdout.WriteLine($"{WorkerProtocol.LogPrefix} {jobType.FullName} defines instance Configure(IServiceCollection, IConfiguration) but has no parameterless constructor; skipping per-job Configure hook.");
-            return;
-        }
-
-        var instance = Activator.CreateInstance(jobType)!;
-        method.Invoke(instance, [services, configuration]);
+        return registration.Factory(provider);
     }
 
     /// <summary>
@@ -260,52 +215,8 @@ public static class WorkerHost
         return builder.AddEnvironmentVariables().Build();
     }
 
-    private static IWorkerStartup? DiscoverStartup(TextWriter stdout)
-    {
-        var candidates = AppDomain.CurrentDomain.GetAssemblies()
-            .SelectMany(SafeGetTypes)
-            .Where(t => typeof(IWorkerStartup).IsAssignableFrom(t)
-                        && t is { IsAbstract: false, IsInterface: false }
-                        && t.GetConstructor(Type.EmptyTypes) is not null)
-            .ToList();
-
-        if (candidates.Count == 0) return null;
-        if (candidates.Count > 1)
-            stdout.WriteLine($"{WorkerProtocol.LogPrefix} Multiple IWorkerStartup implementations found " +
-                             $"({string.Join(", ", candidates.Select(c => c.FullName))}); using {candidates[0].FullName}.");
-
-        return (IWorkerStartup)Activator.CreateInstance(candidates[0])!;
-    }
-
-    private static IEnumerable<Type> SafeGetTypes(Assembly assembly)
-    {
-        try { return assembly.GetTypes(); }
-        catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t is not null)!; }
-    }
-
     private static void SafeCancel(CancellationTokenSource cts)
     {
         try { cts.Cancel(); } catch (ObjectDisposedException) { /* already shutting down */ }
     }
-
-    private static void LoadAssembliesInBaseDirectory()
-    {
-        var dir = AppContext.BaseDirectory;
-        foreach (var dll in Directory.GetFiles(dir, "*.dll"))
-        {
-            try
-            {
-                var name = AssemblyName.GetAssemblyName(dll);
-                if (!AssemblyLoadContext.Default.Assemblies.Any(a => a.GetName().Name == name.Name))
-                    AssemblyLoadContext.Default.LoadFromAssemblyPath(dll);
-            }
-            catch { /* skip native/unmanaged dlls */ }
-        }
-    }
-
-    private static Type? ResolveType(string typeName) =>
-        Type.GetType(typeName) ??
-        AppDomain.CurrentDomain.GetAssemblies()
-            .Select(a => a.GetType(typeName))
-            .FirstOrDefault(t => t is not null);
 }

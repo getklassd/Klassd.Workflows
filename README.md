@@ -38,13 +38,13 @@ dotnet add package Klassd.Workflows.Dashboard --prerelease          # the live U
 | `Klassd.Workflows.Kubernetes` | `KubernetesJobExecutor` — one `batch/v1` Job per execution. |
 | `Klassd.Workflows.Storage.Postgres` / `.Storage.MongoDb` | Durable `IJobStore` adapters. |
 | `Klassd.Workflows.Artifacts.S3` / `.Artifacts.Gcs` | `IArtifactStore` adapters (large payloads). |
-| `Klassd.Workflows.Worker` | The worker host: `WorkerHost.RunAsync()` loads + runs an `IJob`. Reference it from your own exe (plus your jobs) to build a worker image. |
+| `Klassd.Workflows.Worker` | The worker host: `WorkerHost.CreateBuilder(args).RegisterJobs(…).RunAsync()` constructs + runs the dispatched `IJob`. Reference it from your own exe to build a worker image. |
 | `Klassd.Workflows.Dashboard` | The Blazor (Interactive Server) UI as a Razor Class Library — mount it into your host. |
 
 The core carries **no** Kubernetes/AWS/Google/Mongo/Npgsql dependency — each adapter keeps its SDK
 isolated, so you only pull in what you wire up. **`Klassd.Workflows.Worker` ships as a package**:
-reference it from a one-line exe plus your job assemblies to build your own worker image, or layer
-your job DLLs onto the published base image (see *Run on Kubernetes*). The **`Dashboard` also ships
+reference it from a thin exe, register the jobs it can run, and publish it as your own worker image
+(see *Build your own worker image*). The **`Dashboard` also ships
 as a package** (RCL) — mount it into any ASP.NET Core host:
 
 ```csharp
@@ -150,7 +150,7 @@ code, now one pod per execution.
 | `Klassd.Workflows.Abstractions` | The contract jobs implement: `IJob`, `IJobContext`, and the worker stdout protocol. |
 | `Klassd.Workflows.Core` | Scheduler, in-memory store, cron recurring loop (Cronos), job catalog, and the **local-process executor**. |
 | `Klassd.Workflows.Kubernetes` | `KubernetesJobExecutor` — creates a K8s `Job` per run and tails the pod logs. |
-| `Klassd.Workflows.Worker` | The executor-pod entrypoint, packaged. `WorkerHost.RunAsync()` loads the `IJob` by name, runs it, streams log/progress/state to stdout. Optional `IWorkerStartup` adds global DI, and a job type can define `Configure(IServiceCollection, IConfiguration)` for per-execution DI setup. |
+| `Klassd.Workflows.Worker` | The executor-pod entrypoint, packaged. `WorkerHost.CreateBuilder(args).RegisterJobs(…).RunAsync()` constructs the dispatched `IJob` from the registry, runs it, streams log/progress/state to stdout. `ConfigureServices` registers job dependencies; jobs are built with `ActivatorUtilities` or an explicit factory. |
 | `Klassd.Workflows.Dashboard` | Blazor Server UI: live job list, per-job console + progress, recurring jobs, DAG runs. Hosts the scheduler. |
 | `Klassd.Workflows.Storage.Postgres` | Durable `IJobStore` on PostgreSQL (jsonb documents + append-only logs). |
 | `Klassd.Workflows.Storage.MongoDb` | Durable `IJobStore` on MongoDB. |
@@ -396,26 +396,41 @@ worker output exists.)
 
 ## Build your own worker image
 
-The worker is a package, so your jobs live in **your** image. Two ways:
+The worker is a package, so your jobs live in **your** image. Reference `Klassd.Workflows.Worker`
+from a thin exe, register the jobs it can run, and publish it:
 
 ```csharp
-// Library path — a one-line exe referencing Klassd.Workflows.Worker + your job assemblies:
-return await Klassd.Workflows.Worker.WorkerHost.RunAsync(args);
-```
-```dockerfile
-# Base-image path — layer your published job DLLs onto the published worker image:
-FROM ghcr.io/getklassd/workflows-worker:latest
-COPY ./my-published-jobs/ /app/        # the worker loads every assembly in /app at startup
+return await WorkerHost.CreateBuilder(args)
+    // Dependencies your jobs take through their constructors:
+    .ConfigureServices((svc, cfg) => svc.AddHttpClient().AddSingleton<IFoo, Foo>())
+    .RegisterJobs(j =>
+    {
+        j.Add<GreetingJob>();                 // key defaults to the full type name
+        j.Add<EmailJob>("send-email");        // explicit dispatch key
+        j.Add("report", sp => new ReportJob(sp.GetRequiredService<IFoo>())); // explicit factory
+    })
+    // Artifact backends the worker supports, selected by name at runtime ("file" is built in):
+    .AddArtifactProvider(new GcsArtifactStoreProvider())
+    .RunAsync();
 ```
 
-Jobs are created via `ActivatorUtilities`, so they can take constructor dependencies — implement
-`IWorkerStartup` in (or beside) your job assembly to register services and the worker discovers it
-automatically, composing configuration from `appsettings[.{ENV}].json`, `/secrets/*.json`, then
-environment variables. A single job can instead register its own per-execution dependencies with a
-`Configure(IServiceCollection, IConfiguration)` method (static, or instance with a parameterless
-ctor) — discovered by signature, called on every run including workflow nodes. Jobs with a
-parameterless constructor need neither. See [`docs/recipes.md`](docs/recipes.md#give-a-job-dependencies-per-execution-di)
-for worked examples.
+The scheduler launches this exe once per job, passing the **dispatch key** in the environment; the
+worker looks the key up in the registry and constructs the matching job. Jobs are built with
+`ActivatorUtilities`, so they can take constructor dependencies registered via `ConfigureServices`
+(or use an explicit factory) — composing configuration from `appsettings[.{ENV}].json`,
+`/secrets/*.json`, then environment variables.
+
+The scheduler host registers the **same** jobs so the catalog and workflow-node validation agree on
+the keys — put the registration in a shared method both reference:
+
+```csharp
+builder.Services.AddKlassdWorkflowsCore().AddJobs(MyJobs.Register);   // dashboard host
+return await WorkerHost.CreateBuilder(args).RegisterJobs(MyJobs.Register).RunAsync();  // worker exe
+```
+
+The default `Add<T>()` key is the job's full type name, matching what `EnqueueAsync<T>()`, recurring
+jobs and workflow nodes emit — so registering by type "just works" with the rest of the API. See
+[`docs/recipes.md`](docs/recipes.md#give-a-job-dependencies-di) for worked examples.
 
 ## Run on Kubernetes
 

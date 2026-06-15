@@ -1,3 +1,4 @@
+using Klassd.Workflows.Abstractions;
 using Klassd.Workflows.Core.Abstractions;
 using Klassd.Workflows.Core.Execution;
 using Klassd.Workflows.Core.Storage;
@@ -19,6 +20,8 @@ public static class ServiceCollectionExtensions
     {
         // Default store; swap with builder.UseJobStore<T>() / UsePostgres() / UseMongo().
         services.TryAddSingleton<IJobStore, InMemoryJobStore>();
+        // Default empty job registry; populate it with builder.AddJobs(...). The catalog reads from it.
+        services.TryAddSingleton(JobRegistry.Empty);
         services.AddSingleton<IJobCatalog, JobCatalog>();
         services.AddSingleton<IContainerJobRegistry, ContainerJobRegistry>();
         services.AddSingleton<IJobScheduler, JobScheduler>();

@@ -1,3 +1,4 @@
+using Klassd.Workflows.Abstractions;
 using Klassd.Workflows.Core.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -27,6 +28,17 @@ public sealed class WorkflowsBuilder
     public WorkflowsBuilder UseJobStore(Func<IServiceProvider, IJobStore> factory)
     {
         Services.Replace(ServiceDescriptor.Singleton(factory));
+        return this;
+    }
+
+    /// <summary>
+    /// Register the jobs this scheduler knows about, populating the job catalog (the dashboard's
+    /// "Run" buttons and workflow-node validation). Use the same registration the worker exe calls
+    /// (typically a shared static method) so both sides agree on the dispatch keys.
+    /// </summary>
+    public WorkflowsBuilder AddJobs(Action<JobRegistrationBuilder> configure)
+    {
+        Services.Replace(ServiceDescriptor.Singleton(JobRegistry.Build(configure)));
         return this;
     }
 }

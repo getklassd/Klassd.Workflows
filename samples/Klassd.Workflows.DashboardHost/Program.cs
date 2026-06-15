@@ -35,6 +35,10 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["Oidc:Authority"]))
 // --- Klassd.Workflows wiring -------------------------------------------------
 var workflows = builder.Services.AddKlassdWorkflowsCore();
 
+// The jobs this scheduler knows about (catalog "Run" buttons, workflow-node validation). Same
+// shared registration the worker exe runs, so both sides agree on the dispatch keys.
+workflows.AddJobs(SampleJobsRegistration.Register);
+
 // Durable store selection (default in-memory). Set Klassd.Workflows:Store + a connection string.
 switch ((builder.Configuration["Klassd.Workflows:Store"] ?? "inmemory").ToLowerInvariant())
 {

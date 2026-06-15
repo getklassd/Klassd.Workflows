@@ -3,7 +3,12 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Klassd.Workflows.Abstractions</PackageId>
-    <Description>Core contracts for Klassd.Workflows: the IJob/IJobContext job interface, the IArtifactStore artifact-storage seam, and the worker stdout protocol. No dependencies.</Description>
+    <Description>Core contracts for Klassd.Workflows: the IJob/IJobContext job interface, the IArtifactStore artifact-storage seam, the IJobRegistry/JobRegistrationBuilder job-registration API, and the worker stdout protocol.</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ActivatorUtilities backs JobRegistrationBuilder.Add&lt;T&gt;() constructor injection. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+  </ItemGroup>
 
 </Project>

@@ -3,7 +3,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>Klassd.Workflows.Worker</PackageId>
-    <Description>The Klassd.Workflows worker host: WorkerHost.RunAsync() is the executor-pod entry point that loads the requested IJob from the assemblies beside it and runs it against the stdout protocol. Reference this from a thin exe plus your job assemblies to build your own worker image, or layer your job DLLs onto the published base image. Implement IWorkerStartup for constructor-injected jobs.</Description>
+    <Description>The Klassd.Workflows worker host: WorkerHost.CreateBuilder(args).RegisterJobs(...).RunAsync() is the executor-pod entry point. Reference this from a thin exe, register the jobs it can run (with constructor-injected dependencies via ConfigureServices), and publish it as your worker image. It constructs the dispatched IJob from the registry and runs it against the stdout protocol.</Description>
   </PropertyGroup>
 
   <ItemGroup>

@@ -4,18 +4,22 @@ using Klassd.Workflows.Core.Abstractions;
 
 namespace Klassd.Workflows.Core.Execution;
 
-/// <summary>Scans loaded assemblies for concrete IJob types.</summary>
+/// <summary>
+/// Exposes the registered jobs (see <see cref="IJobRegistry"/>) to the dashboard UI's "Run" buttons.
+/// Each registration's key is the dispatch identity; the display name and inputs come from the
+/// registered CLR type's <see cref="JobInputAttribute"/>s when the job was registered by type.
+/// </summary>
 public sealed class JobCatalog : IJobCatalog
 {
     public IReadOnlyList<JobTypeInfo> Jobs { get; }
 
-    public JobCatalog()
+    public JobCatalog(IJobRegistry registry)
     {
-        var jobType = typeof(IJob);
-        Jobs = AppDomain.CurrentDomain.GetAssemblies()
-            .SelectMany(SafeGetTypes)
-            .Where(t => t is { IsClass: true, IsAbstract: false } && jobType.IsAssignableFrom(t))
-            .Select(t => new JobTypeInfo(t.FullName!, t.Name, ReadInputs(t)))
+        Jobs = registry.Registrations
+            .Select(r => new JobTypeInfo(
+                r.Key,
+                r.JobType?.Name ?? r.Key,
+                r.JobType is null ? [] : ReadInputs(r.JobType)))
             .OrderBy(j => j.DisplayName)
             .ToList();
     }
@@ -25,10 +29,4 @@ public sealed class JobCatalog : IJobCatalog
             .Select(a => new JobInputInfo(
                 a.Name, a.Label ?? a.Name, a.Default, a.Required, a.Type, a.Description))
             .ToList();
-
-    private static IEnumerable<Type> SafeGetTypes(Assembly a)
-    {
-        try { return a.GetTypes(); }
-        catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t is not null)!; }
-    }
 }
