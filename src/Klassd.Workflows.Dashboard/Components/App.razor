@@ -1,11 +1,12 @@
 @inject IHttpContextAccessor Http
+@inject WorkflowsDashboardOptions DashboardOptions
 <!DOCTYPE html>
 <html lang="en" data-theme="@ServerTheme">
 
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <base href="/" />
+    <base href="@DashboardOptions.BaseHref" />
     @* Theme. The server renders data-theme from the klassd-theme cookie so it's correct on
        first paint and on every (enhanced) navigation. This script only handles the first-ever
        visit (no cookie yet): pick OS preference, then persist to cookie + localStorage so the
