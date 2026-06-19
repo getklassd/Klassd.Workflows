@@ -92,6 +92,23 @@ public class HostAuthIsolationTests
         await Assert.That(who).IsEqualTo("(anon)");
     }
 
+    /// <summary>The signed-in-only cookie endpoints (e.g. account linking / <c>/me/*</c>) must remain
+    /// reachable in shared-host mode and authorize against the cookie scheme — not the host's default
+    /// (customer) scheme. Proven by the cookie handler's challenge (redirect to its login path) rather
+    /// than the host scheme's 401.</summary>
+    [Test]
+    public async Task Account_linking_endpoint_is_cookie_scheme_bound_in_shared_host()
+    {
+        // Bypass off, so an unauthenticated call really is challenged (not silently let through).
+        await using var host = await BuildSharedHostAsync(bypassOnLoopback: false);
+        var client = host.GetTestClient();
+
+        var response = await client.GetAsync("/auth/me/methods");
+
+        await Assert.That(response.StatusCode).IsEqualTo(HttpStatusCode.Redirect);
+        await Assert.That(response.Headers.Location!.OriginalString).Contains("login");
+    }
+
     /// <summary>
     /// A host that mirrors a storefront monolith: a default "Storefront" auth scheme guarding its own
     /// endpoints, with the Workflows dashboard auth layered in under <c>/jobs</c> in shared-host mode.

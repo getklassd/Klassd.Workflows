@@ -87,7 +87,8 @@ A staff member can use **both SSO and a password on the same account**: an SSO s
 provider-verified email matches an existing password account is attached to it (one user, either method)
 — controlled by `AutoLinkByVerifiedEmail` (default on; only ever links a verified email). The reverse is
 covered from the **Users** area — setting a password on an SSO-only user adds email + password to that
-same account.
+same account. Staff can also self-serve from the **Your account** page (the user name in the top bar):
+add a password, link/unlink an SSO provider, and review their sign-in methods.
 
 #### Hosting inside an app that already has its own auth
 

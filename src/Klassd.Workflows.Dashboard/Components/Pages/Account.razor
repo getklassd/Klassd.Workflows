@@ -1,0 +1,167 @@
+@page "/account"
+@attribute [Authorize]
+@using System.Security.Claims
+@using Klassd.Auth.Abstractions
+@using Klassd.Auth.Core.Modules.Users
+@using Klassd.Auth.AspNetCore.Cookies
+@inject UserAccountService UserSvc
+@inject ExternalLoginRegistry ExternalLogins
+@inject NavigationManager Nav
+
+<PageTitle>Your account · Klassd Workflows</PageTitle>
+
+<h1>Your account</h1>
+<p class="muted" style="margin-bottom:18px;">Your sign-in methods. You can use a password and single
+   sign-on on the same account — add either below.</p>
+
+@if (_message is not null)
+{
+    <div class="alert @(_isError ? "alert-error" : "alert-success")" role="alert" style="margin-bottom:16px;">@_message</div>
+}
+
+@if (_user is null)
+{
+    <p class="muted">Loading…</p>
+}
+else
+{
+    <div class="card" style="margin-bottom:20px;">
+        <h2 style="margin-top:0;">Sign-in methods</h2>
+        <table class="table">
+            <thead>
+                <tr><th>Method</th><th>Identity</th><th style="text-align:right;">Actions</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var m in _user.LoginMethods)
+                {
+                    <tr>
+                        <td>@MethodLabel(m)</td>
+                        <td>@(m.Email ?? m.Phone ?? m.ProviderId ?? "—")</td>
+                        <td style="text-align:right;">
+                            @if (_user.LoginMethods.Count > 1)
+                            {
+                                <button class="btn btn-ghost btn-sm" @onclick="() => UnlinkAsync(m.Id)">Remove</button>
+                            }
+                            else
+                            {
+                                <span class="muted" title="Your only sign-in method can't be removed.">last method</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (!HasPassword)
+    {
+        <div class="card" style="margin-bottom:20px;">
+            <h2 style="margin-top:0;">Add a password</h2>
+            <p class="muted">Set a password so you can also sign in with email + password.</p>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <input class="input" type="password" style="width:220px;" placeholder="New password"
+                       autocomplete="new-password" @bind="_newPassword" />
+                <button class="btn btn-primary btn-sm" @onclick="AddPasswordAsync">Add password</button>
+            </div>
+        </div>
+    }
+
+    @if (LinkableProviders.Count > 0)
+    {
+        <div class="card">
+            <h2 style="margin-top:0;">Add single sign-on</h2>
+            @foreach (var p in LinkableProviders)
+            {
+                <a class="btn btn-ghost" style="margin-right:8px;"
+                   href="/auth/link/@Uri.EscapeDataString(p.Scheme)?returnUrl=@Uri.EscapeDataString(ReturnPath)">
+                    Link @p.DisplayName
+                </a>
+            }
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    // Result of the SSO link round-trip (set by /auth/link-callback's redirect back here).
+    [SupplyParameterFromQuery(Name = "linked")] private string? LinkedStatus { get; set; }
+
+    private User? _user;
+    private string? _userId;
+    private string _newPassword = "";
+    private string? _message;
+    private bool _isError;
+
+    private bool HasPassword => _user?.LoginMethods.Any(m => m.Kind == LoginMethodKind.EmailPassword) ?? false;
+
+    // Configured SSO providers not yet linked to this account.
+    private IReadOnlyList<ExternalLoginDescriptor> LinkableProviders =>
+        _user is null
+            ? []
+            : ExternalLogins.Providers
+                .Where(p => !_user.LoginMethods.Any(m => m.Kind == LoginMethodKind.ThirdParty && m.ProviderId == p.Scheme))
+                .ToList();
+
+    // Absolute path of this page, so the SSO callback returns here whether mounted at root or a sub-path.
+    private string ReturnPath => new Uri(Nav.Uri).AbsolutePath;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is not null)
+            _userId = (await AuthState).User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        _message = LinkedStatus switch
+        {
+            "ok" => "Single sign-on linked.",
+            "already" => "That account was already linked.",
+            "conflict" => null,   // handled as error below
+            null or "" => null,
+            _ => null,
+        };
+        if (LinkedStatus is "conflict") { _message = "That identity is already linked to a different user."; _isError = true; }
+        else if (LinkedStatus is "error") { _message = "Linking failed. Please try again."; _isError = true; }
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_userId is not null) _user = await UserSvc.GetByIdAsync(_userId);
+    }
+
+    private void Notify(string message, bool error = false)
+    {
+        _message = message;
+        _isError = error;
+    }
+
+    private async Task AddPasswordAsync()
+    {
+        if (_userId is null) return;
+        if (string.IsNullOrEmpty(_newPassword)) { Notify("Enter a password first.", error: true); return; }
+
+        var ok = await UserSvc.AddPasswordAsync(_userId, _newPassword);
+        _newPassword = "";
+        await ReloadAsync();
+        Notify(ok ? "Password added — you can now sign in with email + password." : "You already have a password.", error: !ok);
+    }
+
+    private async Task UnlinkAsync(string methodId)
+    {
+        if (_userId is null) return;
+        var ok = await UserSvc.UnlinkAsync(_userId, methodId);
+        await ReloadAsync();
+        if (!ok) Notify("Couldn't remove that method (it may be your last one).", error: true);
+        else Notify("Sign-in method removed.");
+    }
+
+    private static string MethodLabel(LoginMethod m) => m.Kind switch
+    {
+        LoginMethodKind.EmailPassword => "Email + password",
+        LoginMethodKind.ThirdParty => $"SSO · {m.ProviderId}",
+        LoginMethodKind.Passwordless => "Passwordless",
+        LoginMethodKind.Passkey => "Passkey",
+        _ => m.Kind.ToString(),
+    };
+}
