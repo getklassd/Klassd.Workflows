@@ -84,6 +84,7 @@ public static class KlassdWorkflowsAuthExtensions
             o.BypassOnLoopback = options.OwnsHost && options.BypassOnLoopback;
             o.AllowLocalLogin = options.AllowLocalLogin;
             o.AutoProvisionExternalUsers = options.AutoProvisionExternalUsers;
+            o.AutoLinkByVerifiedEmail = options.AutoLinkByVerifiedEmail;
             if (!string.IsNullOrEmpty(options.SeedAdminPassword))
             {
                 o.SeedAdminEmail = options.SeedAdminEmail;

@@ -174,11 +174,26 @@ else
         var pwd = _resetInputs.GetValueOrDefault(user.Id, "");
         if (string.IsNullOrEmpty(pwd))
         {
-            Notify("Enter a new password first.", error: true);
+            Notify("Enter a password first.", error: true);
             return;
         }
-        await UserSvc.ResetPasswordAsync(user.Id, pwd);
+
+        // An SSO-only user has no email+password method yet: ADD one (so they can use both), rather than
+        // resetting a method that doesn't exist. A user that already has a password just gets it reset.
+        var hasPassword = user.LoginMethods.Any(m => m.Kind == LoginMethodKind.EmailPassword);
+        var ok = hasPassword
+            ? await UserSvc.ResetPasswordAsync(user.Id, pwd)
+            : await UserSvc.AddPasswordAsync(user.Id, pwd);
+
         _resetInputs[user.Id] = "";
-        Notify($"Password updated for '{Label(user)}'.");
+        if (!ok)
+        {
+            Notify($"Couldn't set a password for '{Label(user)}'.", error: true);
+            return;
+        }
+        await ReloadAsync();
+        Notify(hasPassword
+            ? $"Password updated for '{Label(user)}'."
+            : $"Password added for '{Label(user)}' — they can now sign in with email + password or SSO.");
     }
 }

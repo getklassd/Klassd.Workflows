@@ -19,7 +19,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>workflows;jobs;scheduler;background-jobs;cron;dag;orchestration;kubernetes;dotnet</PackageTags>
-    <Version>0.8.0</Version>
+    <Version>0.9.0</Version>
 
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>

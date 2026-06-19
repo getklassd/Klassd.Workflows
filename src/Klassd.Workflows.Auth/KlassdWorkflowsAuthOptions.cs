@@ -72,6 +72,15 @@ public sealed class KlassdWorkflowsAuthOptions
     /// </summary>
     public bool AutoProvisionExternalUsers { get; set; } = true;
 
+    /// <summary>
+    /// When an SSO sign-in's email matches an existing local (email + password) account, attach the SSO
+    /// identity to THAT account instead of creating a second one — so a staff member can sign in with
+    /// either their password or SSO and land on the same user. Default true. Only ever links when the
+    /// identity provider reports the email as <em>verified</em> (auto-linking by an unverified email is an
+    /// account-takeover vector), so it is safe with a trusted corporate IdP; set false to disable.
+    /// </summary>
+    public bool AutoLinkByVerifiedEmail { get; set; } = true;
+
     /// <summary>If set (with <see cref="SeedAdminPassword"/>), a user with this email is created on
     /// startup when the store has no users yet — so a fresh deployment isn't locked out.</summary>
     public string? SeedAdminEmail { get; set; }

@@ -79,7 +79,7 @@ public class WorkflowsUserServiceTests
     }
 
     [Test]
-    public async Task Provision_external_links_existing_account_by_email()
+    public async Task Provision_external_links_existing_account_by_verified_email()
     {
         var db = TempDb();
         try
@@ -87,11 +87,35 @@ public class WorkflowsUserServiceTests
             var svc = await NewServiceAsync(db);
             var local = await svc.CreateLocalAsync(null, "jane@example.com", "pw");
 
+            // SSO sign-in with a provider-VERIFIED matching email attaches to the existing password
+            // account (the staff "both methods, one account" flow), when auto-link is enabled.
             var linked = await svc.ProvisionExternalAsync("oidc",
-                new ExternalUserInfo("sub-123", Email: "jane@example.com"), autoProvision: true);
+                new ExternalUserInfo("sub-123", Email: "jane@example.com", EmailVerified: true),
+                autoProvision: true, autoLinkByVerifiedEmail: true);
 
             await Assert.That(linked!.Id).IsEqualTo(local.Id);   // same account, not a new one
             await Assert.That((await svc.GetAllAsync()).Count).IsEqualTo(1);
+        }
+        finally { Cleanup(db); }
+    }
+
+    [Test]
+    public async Task Provision_external_does_not_link_by_unverified_email()
+    {
+        var db = TempDb();
+        try
+        {
+            var svc = await NewServiceAsync(db);
+            await svc.CreateLocalAsync(null, "jane@example.com", "pw");
+
+            // An UNverified matching email must NOT auto-link (account-takeover guard) — a separate
+            // account is provisioned instead.
+            var result = await svc.ProvisionExternalAsync("oidc",
+                new ExternalUserInfo("sub-123", Email: "jane@example.com", EmailVerified: false),
+                autoProvision: true, autoLinkByVerifiedEmail: true);
+
+            await Assert.That(result).IsNotNull();
+            await Assert.That((await svc.GetAllAsync()).Count).IsEqualTo(2);
         }
         finally { Cleanup(db); }
     }

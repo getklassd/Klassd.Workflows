@@ -83,6 +83,12 @@ Email/password admins are managed in the dashboard's **Users** area; SSO is adde
 `AddKlassdWorkflowsOpenIdConnect(...)` (a thin wrapper over `Klassd.Auth.OpenIdConnect`). Users live
 in the Klassd.Auth store, sharing your chosen storage adapter's database.
 
+A staff member can use **both SSO and a password on the same account**: an SSO sign-in whose
+provider-verified email matches an existing password account is attached to it (one user, either method)
+— controlled by `AutoLinkByVerifiedEmail` (default on; only ever links a verified email). The reverse is
+covered from the **Users** area — setting a password on an SSO-only user adds email + password to that
+same account.
+
 #### Hosting inside an app that already has its own auth
 
 By default the dashboard auth owns the whole host. To mount it **inside an existing app** that already
