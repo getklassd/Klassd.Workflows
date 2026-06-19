@@ -83,6 +83,31 @@ Email/password admins are managed in the dashboard's **Users** area; SSO is adde
 `AddKlassdWorkflowsOpenIdConnect(...)` (a thin wrapper over `Klassd.Auth.OpenIdConnect`). Users live
 in the Klassd.Auth store, sharing your chosen storage adapter's database.
 
+#### Hosting inside an app that already has its own auth
+
+By default the dashboard auth owns the whole host. To mount it **inside an existing app** that already
+has its own authentication (e.g. a storefront with a customer token scheme), set `OwnsHost = false` and
+give the dashboard's mount path. Authentication and the loopback bypass are then scoped to the dashboard
+routes only — the host's own auth is left untouched, and the dashboard authenticates **its own staff
+cookie + SSO exclusively** (a customer principal from the host's scheme is never honoured on the
+dashboard).
+
+```csharp
+builder.Services.AddKlassdWorkflowsDashboard("/jobs");
+builder.Services.AddKlassdWorkflowsAuth(o =>
+{
+    o.OwnsHost = false;        // share the host with its existing auth
+    o.BasePath = "/jobs";      // same sub-path as AddKlassdWorkflowsDashboard
+    o.SeedAdminEmail = "admin@example.com";
+    o.SeedAdminPassword = builder.Configuration["Seed:AdminPassword"];
+});
+// ...
+app.UseKlassdWorkflowsAuth();  // scoped to /jobs + /auth — never the host's routes
+```
+
+Mount the dashboard by its `<base href>` (the `BasePath` above); do **not** use `UsePathBase` in this
+mode, so dashboard request paths keep their prefix and stay distinct from the host's routes.
+
 ## Quickstart
 
 A working jobs service with the live dashboard in four steps. (For dev you can stop after step 3 —

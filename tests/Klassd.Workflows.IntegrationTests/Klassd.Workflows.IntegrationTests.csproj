@@ -6,7 +6,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- For the in-process TestServer auth-isolation test (HostAuthIsolationTests). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="TUnit" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Testcontainers" />
     <PackageReference Include="Testcontainers.K3s" />
     <PackageReference Include="Testcontainers.Minio" />
