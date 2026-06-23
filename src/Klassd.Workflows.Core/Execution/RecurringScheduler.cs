@@ -63,7 +63,7 @@ public sealed class RecurringScheduler : BackgroundService
                 RecurringKind.Workflow => await _scheduler.EnqueueWorkflowAsync(job.WorkflowName, job.Tenant),
                 RecurringKind.Container when job.Container is not null =>
                     await _scheduler.EnqueueContainerAsync(job.JobTypeName, job.Container, job.Arguments, job.Tenant),
-                _ => await _scheduler.EnqueueAsync(job.JobTypeName, job.Arguments, job.Tenant)
+                _ => await _scheduler.EnqueueAsync(job.JobTypeName, job.Arguments, job.Tenant, job.InitContainers)
             };
             await _store.UpsertRecurringAsync(job);
         }

@@ -227,6 +227,16 @@ scheduler.AddOrUpdateRecurring<MyJob>("nightly", "0 2 * * *");   // cron
 await scheduler.EnqueueAsync<MyJob>();                            // fire now
 ```
 
+A standalone job can also carry init containers (run to completion before the worker pod's main
+container — e.g. a migration), the same way DAG nodes and container jobs do:
+
+```csharp
+await scheduler.EnqueueAsync<MyJob>(initContainers: new[]
+{
+    new InitContainerSpec { Name = "migrate", Image = "myorg/migrate:1" }
+});
+```
+
 ### Multi-tenant jobs
 
 One job image can serve many tenants, each loading its own configuration — no per-tenant

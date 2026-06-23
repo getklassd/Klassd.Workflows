@@ -21,20 +21,25 @@ public sealed class JobScheduler : IJobScheduler
         _logger = logger;
     }
 
-    public async Task<string> EnqueueAsync(string jobTypeName, Dictionary<string, string>? args = null, string? tenant = null)
+    public async Task<string> EnqueueAsync(string jobTypeName, Dictionary<string, string>? args = null, string? tenant = null, IReadOnlyList<InitContainerSpec>? initContainers = null)
     {
         var name = jobTypeName.Contains('.') ? jobTypeName[(jobTypeName.LastIndexOf('.') + 1)..] : jobTypeName;
         var descriptor = new JobDescriptor(name, jobTypeName, args ?? new()) { Tenant = tenant };
         var exec = await _store.CreateAsync(descriptor, _executor.Name);
+        if (initContainers is { Count: > 0 })
+        {
+            exec.InitContainers = initContainers.ToList();
+            await _store.UpdateAsync(exec);
+        }
         _logger.LogInformation("Enqueued {Job} as {Id}", name, exec.Id);
         await _executor.StartAsync(exec);
         return exec.Id;
     }
 
-    public Task<string> EnqueueAsync<TJob>(Dictionary<string, string>? args = null, string? tenant = null) where TJob : IJob =>
-        EnqueueAsync(typeof(TJob).FullName!, args, tenant);
+    public Task<string> EnqueueAsync<TJob>(Dictionary<string, string>? args = null, string? tenant = null, IReadOnlyList<InitContainerSpec>? initContainers = null) where TJob : IJob =>
+        EnqueueAsync(typeof(TJob).FullName!, args, tenant, initContainers);
 
-    public void AddOrUpdateRecurring(string id, string jobTypeName, string cron, Dictionary<string, string>? args = null, string? tenant = null)
+    public void AddOrUpdateRecurring(string id, string jobTypeName, string cron, Dictionary<string, string>? args = null, string? tenant = null, IReadOnlyList<InitContainerSpec>? initContainers = null)
     {
         _store.UpsertRecurringAsync(new RecurringJob
         {
@@ -42,14 +47,15 @@ public sealed class JobScheduler : IJobScheduler
             JobTypeName = jobTypeName,
             Cron = cron,
             Arguments = args ?? new(),
-            Tenant = tenant
+            Tenant = tenant,
+            InitContainers = initContainers?.ToList() ?? new()
         }).GetAwaiter().GetResult();
         _logger.LogInformation("Registered recurring job {Id} ({Cron})", id, cron);
     }
 
-    public void AddOrUpdateRecurring<TJob>(string id, string cron, Dictionary<string, string>? args = null, string? tenant = null)
+    public void AddOrUpdateRecurring<TJob>(string id, string cron, Dictionary<string, string>? args = null, string? tenant = null, IReadOnlyList<InitContainerSpec>? initContainers = null)
         where TJob : IJob =>
-        AddOrUpdateRecurring(id, typeof(TJob).FullName!, cron, args, tenant);
+        AddOrUpdateRecurring(id, typeof(TJob).FullName!, cron, args, tenant, initContainers);
 
     public async Task<string> EnqueueContainerAsync(string name, ContainerSpec container, Dictionary<string, string>? args = null, string? tenant = null)
     {

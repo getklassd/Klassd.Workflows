@@ -6,11 +6,11 @@ namespace Klassd.Workflows.Core.Abstractions;
 /// <summary>The public API apps use to enqueue and schedule jobs from code.</summary>
 public interface IJobScheduler
 {
-    Task<string> EnqueueAsync(string jobTypeName, Dictionary<string, string>? args = null, string? tenant = null);
-    Task<string> EnqueueAsync<TJob>(Dictionary<string, string>? args = null, string? tenant = null) where TJob : IJob;
+    Task<string> EnqueueAsync(string jobTypeName, Dictionary<string, string>? args = null, string? tenant = null, IReadOnlyList<InitContainerSpec>? initContainers = null);
+    Task<string> EnqueueAsync<TJob>(Dictionary<string, string>? args = null, string? tenant = null, IReadOnlyList<InitContainerSpec>? initContainers = null) where TJob : IJob;
 
-    void AddOrUpdateRecurring(string id, string jobTypeName, string cron, Dictionary<string, string>? args = null, string? tenant = null);
-    void AddOrUpdateRecurring<TJob>(string id, string cron, Dictionary<string, string>? args = null, string? tenant = null) where TJob : IJob;
+    void AddOrUpdateRecurring(string id, string jobTypeName, string cron, Dictionary<string, string>? args = null, string? tenant = null, IReadOnlyList<InitContainerSpec>? initContainers = null);
+    void AddOrUpdateRecurring<TJob>(string id, string cron, Dictionary<string, string>? args = null, string? tenant = null, IReadOnlyList<InitContainerSpec>? initContainers = null) where TJob : IJob;
 
     /// <summary>
     /// Enqueue a standalone job that runs an arbitrary container image (not an <c>IJob</c>) — e.g. a

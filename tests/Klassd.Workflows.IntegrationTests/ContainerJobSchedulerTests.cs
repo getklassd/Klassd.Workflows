@@ -33,6 +33,39 @@ public class ContainerJobSchedulerTests
     }
 
     [Test]
+    public async Task EnqueueAsync_with_initContainers_carries_them_on_execution()
+    {
+        var store = new InMemoryJobStore();
+        var exec = new RecordingExecutor();
+        var sched = NewScheduler(store, exec);
+
+        var id = await sched.EnqueueAsync("Acme.MigrateThenRun",
+            initContainers: new[] { new InitContainerSpec { Name = "migrate", Image = "ghcr.io/acme/migrator:2.0" } });
+
+        var stored = await store.GetAsync(id);
+        await Assert.That(stored!.InitContainers.Count).IsEqualTo(1);
+        await Assert.That(stored.InitContainers[0].Image).IsEqualTo("ghcr.io/acme/migrator:2.0");
+
+        // Handed to the executor carrying the init containers (it merges them into the pod).
+        await Assert.That(exec.Started.Any(e => e.Id == id && e.InitContainers.Count == 1)).IsTrue();
+    }
+
+    [Test]
+    public async Task AddOrUpdateRecurring_persists_initContainers()
+    {
+        var store = new InMemoryJobStore();
+        var sched = NewScheduler(store, new RecordingExecutor());
+
+        sched.AddOrUpdateRecurring("nightly-migrate", "Acme.MigrateThenRun", "0 3 * * *",
+            initContainers: new[] { new InitContainerSpec { Name = "migrate", Image = "ghcr.io/acme/migrator:2.0" } });
+
+        var entry = (await store.ListRecurringAsync()).Single(r => r.Id == "nightly-migrate");
+        await Assert.That(entry.Kind).IsEqualTo(RecurringKind.Job);
+        await Assert.That(entry.InitContainers.Count).IsEqualTo(1);
+        await Assert.That(entry.InitContainers[0].Image).IsEqualTo("ghcr.io/acme/migrator:2.0");
+    }
+
+    [Test]
     public async Task AddOrUpdateRecurringContainer_persists_container_kind()
     {
         var store = new InMemoryJobStore();

@@ -18,6 +18,9 @@ public sealed class RecurringJob
     /// <summary>For <see cref="RecurringKind.Container"/>: the image to run.</summary>
     public ContainerSpec? Container { get; set; }
 
+    /// <summary>For <see cref="RecurringKind.Job"/>: init containers to run before each fired run.</summary>
+    public List<InitContainerSpec> InitContainers { get; set; } = new();
+
     public string Cron { get; set; } = "";
     public Dictionary<string, string> Arguments { get; set; } = new();
 
