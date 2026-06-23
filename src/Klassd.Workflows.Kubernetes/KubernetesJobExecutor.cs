@@ -200,6 +200,8 @@ public sealed class KubernetesJobExecutor : IJobExecutor
                 .Concat(argEnv)
                 .Append(PodIpEnvVar())
                 .ToList();
+            if (!string.IsNullOrEmpty(exec.Tenant))
+                env.Add(new V1EnvVar { Name = WorkerProtocol.EnvTenant, Value = exec.Tenant });
             return new V1Container
             {
                 Name = spec.Name,
