@@ -60,10 +60,10 @@ public sealed class RecurringScheduler : BackgroundService
             job.LastRun = now;
             job.LastExecutionId = job.Kind switch
             {
-                RecurringKind.Workflow => await _scheduler.EnqueueWorkflowAsync(job.WorkflowName),
+                RecurringKind.Workflow => await _scheduler.EnqueueWorkflowAsync(job.WorkflowName, job.Tenant),
                 RecurringKind.Container when job.Container is not null =>
-                    await _scheduler.EnqueueContainerAsync(job.JobTypeName, job.Container, job.Arguments),
-                _ => await _scheduler.EnqueueAsync(job.JobTypeName, job.Arguments)
+                    await _scheduler.EnqueueContainerAsync(job.JobTypeName, job.Container, job.Arguments, job.Tenant),
+                _ => await _scheduler.EnqueueAsync(job.JobTypeName, job.Arguments, job.Tenant)
             };
             await _store.UpsertRecurringAsync(job);
         }

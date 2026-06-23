@@ -10,6 +10,9 @@ public sealed class JobExecution
     public string JobTypeName { get; set; } = "";
     public Dictionary<string, string> Arguments { get; set; } = new();
 
+    /// <summary>Tenant this run belongs to, or <c>null</c> for a non-tenant run. Flows to the worker as <c>KLASSD_TENANT</c>.</summary>
+    public string? Tenant { get; set; }
+
     public JobStatus Status { get; set; } = JobStatus.Enqueued;
     public int Progress { get; set; }
     public string? ProgressMessage { get; set; }

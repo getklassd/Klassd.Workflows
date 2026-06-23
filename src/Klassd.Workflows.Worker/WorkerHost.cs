@@ -42,6 +42,8 @@ public static class WorkerHost
         string jobName = Environment.GetEnvironmentVariable(WorkerProtocol.EnvJobName) ?? "unknown";
         string? jobKey = Environment.GetEnvironmentVariable(WorkerProtocol.EnvJobType);
         string argsJson = Environment.GetEnvironmentVariable(WorkerProtocol.EnvJobArgs) ?? "{}";
+        string? tenant = Environment.GetEnvironmentVariable(WorkerProtocol.EnvTenant);
+        if (string.IsNullOrWhiteSpace(tenant)) tenant = null;
 
         void Fail(string message)
         {
@@ -60,7 +62,7 @@ public static class WorkerHost
         IJob job;
         try
         {
-            job = CreateJob(registry, jobKey, configureServices);
+            job = CreateJob(registry, jobKey, configureServices, tenant);
         }
         catch (Exception ex)
         {
@@ -94,7 +96,7 @@ public static class WorkerHost
         var podIp = Environment.GetEnvironmentVariable(WorkerProtocol.EnvPodIp);
         if (string.IsNullOrWhiteSpace(podIp)) podIp = "127.0.0.1";
 
-        var context = new JobContext(jobId, jobName, jobArgs, cts.Token, stdout, artifacts, podIp);
+        var context = new JobContext(jobId, jobName, jobArgs, cts.Token, stdout, artifacts, podIp, tenant);
 
         try
         {
@@ -179,14 +181,14 @@ public static class WorkerHost
     /// registered under the key.
     /// </summary>
     private static IJob CreateJob(IJobRegistry registry, string key,
-        IReadOnlyList<Action<IServiceCollection, IConfiguration>> configureServices)
+        IReadOnlyList<Action<IServiceCollection, IConfiguration>> configureServices, string? tenant)
     {
         if (!registry.TryGet(key, out var registration))
             throw new InvalidOperationException(
                 $"No job registered for key '{key}'. Registered keys: " +
                 $"{string.Join(", ", registry.Registrations.Select(r => r.Key))}.");
 
-        var configuration = BuildConfiguration();
+        var configuration = BuildConfiguration(tenant);
         var services = new ServiceCollection();
         services.AddSingleton(configuration);
         foreach (var configure in configureServices) configure(services, configuration);
@@ -197,10 +199,13 @@ public static class WorkerHost
     }
 
     /// <summary>
-    /// appsettings[.{ENV}].json (optional) → every <c>/secrets/*.json</c> (the Vault-agent drop dir,
-    /// if present) → environment variables. Last source wins, so env overrides files.
+    /// appsettings[.{ENV}].json → (when multi-tenant) appsettings.{tenant}.json → every
+    /// <c>/secrets/*.json</c> (the Vault-agent drop dir) → that tenant's <c>/secrets/{tenant}/*.json</c>
+    /// → environment variables. Last source wins, so the tenant overlay overrides the shared base and
+    /// env overrides everything. This is what lets one job image serve many tenants: the job reads its
+    /// injected <see cref="IConfiguration"/> normally and gets tenant-scoped values for free.
     /// </summary>
-    private static IConfiguration BuildConfiguration()
+    private static IConfiguration BuildConfiguration(string? tenant)
     {
         var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
                   ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
@@ -210,13 +215,28 @@ public static class WorkerHost
             .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
         if (!string.IsNullOrWhiteSpace(env))
             builder.AddJsonFile($"appsettings.{env}.json", optional: true, reloadOnChange: false);
+        if (!string.IsNullOrWhiteSpace(tenant))
+            builder.AddJsonFile($"appsettings.{tenant}.json", optional: true, reloadOnChange: false);
 
         const string secretsDir = "/secrets";
         if (Directory.Exists(secretsDir))
+        {
             foreach (var file in Directory.EnumerateFiles(secretsDir, "*.json").OrderBy(f => f, StringComparer.Ordinal))
                 builder.AddJsonFile(file, optional: true, reloadOnChange: false);
 
-        return builder.AddEnvironmentVariables().Build();
+            var tenantSecrets = string.IsNullOrWhiteSpace(tenant) ? null : Path.Combine(secretsDir, tenant);
+            if (tenantSecrets is not null && Directory.Exists(tenantSecrets))
+                foreach (var file in Directory.EnumerateFiles(tenantSecrets, "*.json").OrderBy(f => f, StringComparer.Ordinal))
+                    builder.AddJsonFile(file, optional: true, reloadOnChange: false);
+        }
+
+        builder.AddEnvironmentVariables();
+        // Surface the tenant as a config key so a job's static Configure can branch on it. Added last
+        // so it's authoritative — a file/env can't shadow the engine-supplied value.
+        if (!string.IsNullOrWhiteSpace(tenant))
+            builder.AddInMemoryCollection([new(WorkerProtocol.ConfigTenantKey, tenant)]);
+
+        return builder.Build();
     }
 
     private static void SafeCancel(CancellationTokenSource cts)

@@ -50,7 +50,7 @@ internal sealed class RecordingExecutor : IJobExecutor
 
 internal sealed class NoopOrchestrator : IWorkflowOrchestrator
 {
-    public Task<string> StartAsync(string definitionName) => Task.FromResult("noop");
+    public Task<string> StartAsync(string definitionName, string? tenant = null) => Task.FromResult("noop");
 }
 
 /// <summary>

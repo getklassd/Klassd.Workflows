@@ -20,6 +20,9 @@ public sealed class RecurringJob
 
     public string Cron { get; set; } = "";
     public Dictionary<string, string> Arguments { get; set; } = new();
+
+    /// <summary>Tenant each fired run belongs to, or <c>null</c>.</summary>
+    public string? Tenant { get; set; }
     public bool Enabled { get; set; } = true;
 
     public DateTimeOffset? LastRun { get; set; }

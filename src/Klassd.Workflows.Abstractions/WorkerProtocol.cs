@@ -34,6 +34,14 @@ public static class WorkerProtocol
     public const string EnvJobName = "KLASSD_JOB_NAME";
     public const string EnvJobType = "KLASSD_JOB_TYPE";   // assembly-qualified-ish full type name
     public const string EnvJobArgs = "KLASSD_JOB_ARGS";   // JSON object of string->string
+    public const string EnvTenant = "KLASSD_TENANT";      // tenant id this run belongs to (empty = none)
+
+    /// <summary>
+    /// Configuration key under which the worker surfaces the current tenant, so a job's static
+    /// <c>Configure(services, configuration)</c> can register tenant-specific dependencies with
+    /// <c>configuration[WorkerProtocol.ConfigTenantKey]</c>. Absent (null) for a non-tenant run.
+    /// </summary>
+    public const string ConfigTenantKey = "Klassd:Tenant";
     public const string EnvArtifactDir = "KLASSD_ARTIFACT_DIR";           // file provider directory (back-compat)
     public const string EnvArtifactProvider = "KLASSD_ARTIFACT_PROVIDER"; // provider name: file | gcs | s3 | custom
     public const string EnvArtifactSettings = "KLASSD_ARTIFACT_SETTINGS"; // JSON object of provider settings

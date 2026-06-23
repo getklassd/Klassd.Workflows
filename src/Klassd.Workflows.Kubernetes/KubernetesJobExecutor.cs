@@ -93,6 +93,8 @@ public sealed class KubernetesJobExecutor : IJobExecutor
             new() { Name = WorkerProtocol.EnvJobArgs, Value = JsonSerializer.Serialize(exec.Arguments) },
             PodIpEnvVar(),
         };
+        if (!string.IsNullOrEmpty(exec.Tenant))
+            env.Add(new V1EnvVar { Name = WorkerProtocol.EnvTenant, Value = exec.Tenant });
         var artifactSettings = new Dictionary<string, string>(_options.ArtifactSettings);
         if (_options.ArtifactProvider == "file" && !artifactSettings.ContainsKey("dir")
             && !string.IsNullOrWhiteSpace(_options.ArtifactDir))
@@ -364,6 +366,8 @@ public sealed class KubernetesJobExecutor : IJobExecutor
             if (!k.StartsWith("__", StringComparison.Ordinal))
                 env.Add(new V1EnvVar { Name = k, Value = v });
         env.Add(PodIpEnvVar());
+        if (!string.IsNullOrEmpty(exec.Tenant))
+            env.Add(new V1EnvVar { Name = WorkerProtocol.EnvTenant, Value = exec.Tenant });
 
         var ports = new List<V1ContainerPort>();
         if (spec.ServicePort is { } sp) ports.Add(new V1ContainerPort { ContainerPort = sp });

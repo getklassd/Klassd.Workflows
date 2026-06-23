@@ -13,11 +13,13 @@ internal sealed class JobContext(
     CancellationToken cancellationToken,
     TextWriter @out,
     IArtifactStore artifacts,
-    string podIp)
+    string podIp,
+    string? tenant)
     : IJobContext
 {
     public string JobId { get; } = jobId;
     public string JobName { get; } = jobName;
+    public string? Tenant { get; } = tenant;
     public IReadOnlyDictionary<string, string> Arguments { get; } = args;
     public CancellationToken CancellationToken { get; } = cancellationToken;
     public IArtifactStore Artifacts { get; } = artifacts;

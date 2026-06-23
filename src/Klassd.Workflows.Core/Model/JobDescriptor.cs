@@ -11,4 +11,7 @@ public sealed record JobDescriptor(
 
     /// <summary>Long-running service (daemon) node — readiness, not exit, satisfies dependents.</summary>
     public bool IsService { get; init; }
+
+    /// <summary>Tenant this run belongs to, or <c>null</c> for a non-tenant run.</summary>
+    public string? Tenant { get; init; }
 }

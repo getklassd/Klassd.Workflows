@@ -68,12 +68,12 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
 
     public void Dispose() => _store.ExecutionChanged -= OnExecutionChanged;
 
-    public async Task<string> StartAsync(string definitionName)
+    public async Task<string> StartAsync(string definitionName, string? tenant = null)
     {
         var def = _registry.Get(definitionName)
             ?? throw new InvalidOperationException($"Unknown workflow '{definitionName}'.");
 
-        var run = new WorkflowRun { DefinitionName = def.Name };
+        var run = new WorkflowRun { DefinitionName = def.Name, Tenant = tenant };
         foreach (var node in def.Nodes)
         {
             run.Nodes.Add(new NodeRun
@@ -350,6 +350,7 @@ public sealed class WorkflowOrchestrator : IWorkflowOrchestrator, IHostedService
         var exec = await _store.CreateAsync(descriptor, _executor.Name);
         exec.WorkflowRunId = runId;
         exec.NodeName = node.Name;
+        exec.Tenant = (await _store.GetWorkflowRunAsync(runId))?.Tenant; // every node inherits the run's tenant
         exec.Container = defNode.Container;
         exec.IsService = defNode.IsService;
         exec.InitContainers = defNode.InitContainers.ToList();

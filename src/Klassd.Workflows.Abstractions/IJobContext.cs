@@ -12,6 +12,14 @@ public interface IJobContext
     /// <summary>Human-friendly job name.</summary>
     string JobName { get; }
 
+    /// <summary>
+    /// Tenant this run belongs to, or <c>null</c> when not multi-tenant. The worker has already
+    /// layered tenant-specific configuration (<c>appsettings.{tenant}.json</c>, <c>/secrets/{tenant}/</c>)
+    /// over the base, so the job's injected <see cref="Microsoft.Extensions.Configuration.IConfiguration"/>
+    /// is already tenant-scoped; read this only when a job must branch on the tenant explicitly.
+    /// </summary>
+    string? Tenant { get; }
+
     /// <summary>Arguments passed to the job at enqueue time.</summary>
     IReadOnlyDictionary<string, string> Arguments { get; }
 

@@ -21,6 +21,7 @@ public sealed class InMemoryJobStore : IJobStore
             JobName = descriptor.JobName,
             JobTypeName = descriptor.JobTypeName,
             Arguments = new Dictionary<string, string>(descriptor.Arguments),
+            Tenant = descriptor.Tenant,
             ExecutorName = executorName,
             Status = JobStatus.Enqueued
         };

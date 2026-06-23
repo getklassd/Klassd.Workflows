@@ -76,6 +76,8 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
         psi.Environment[WorkerProtocol.EnvJobName] = exec.JobName;
         psi.Environment[WorkerProtocol.EnvJobType] = exec.JobTypeName;
         psi.Environment[WorkerProtocol.EnvJobArgs] = JsonSerializer.Serialize(exec.Arguments);
+        if (!string.IsNullOrEmpty(exec.Tenant))
+            psi.Environment[WorkerProtocol.EnvTenant] = exec.Tenant;
 
         var artifactSettings = new Dictionary<string, string>(_options.ArtifactSettings);
         if (_options.ArtifactProvider == "file" && !artifactSettings.ContainsKey("dir"))
@@ -160,6 +162,7 @@ public sealed class LocalProcessJobExecutor : IJobExecutor
         foreach (var (k, v) in exec.Arguments)
             if (!k.StartsWith("__", StringComparison.Ordinal)) { args.Add("-e"); args.Add($"{k}={v}"); }
         args.Add("-e"); args.Add($"{WorkerProtocol.EnvPodIp}=127.0.0.1");
+        if (!string.IsNullOrEmpty(exec.Tenant)) { args.Add("-e"); args.Add($"{WorkerProtocol.EnvTenant}={exec.Tenant}"); }
 
         // Declarative file outputs: bind-mount a host temp dir per output directory so we can read the
         // files back after the (run-to-completion) container exits. Services don't produce outputs.

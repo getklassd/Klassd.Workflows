@@ -14,6 +14,9 @@ public sealed class WorkflowRun
 {
     public string Id { get; init; } = Guid.NewGuid().ToString("n");
     public string DefinitionName { get; init; } = "";
+
+    /// <summary>Tenant this run belongs to, or <c>null</c>. Every node execution inherits it.</summary>
+    public string? Tenant { get; init; }
     public WorkflowRunStatus Status { get; set; } = WorkflowRunStatus.Running;
     public List<NodeRun> Nodes { get; init; } = new();
 

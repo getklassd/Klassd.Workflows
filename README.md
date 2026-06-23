@@ -227,6 +227,50 @@ scheduler.AddOrUpdateRecurring<MyJob>("nightly", "0 2 * * *");   // cron
 await scheduler.EnqueueAsync<MyJob>();                            // fire now
 ```
 
+### Multi-tenant jobs
+
+One job image can serve many tenants, each loading its own configuration — no per-tenant
+code. Pass a `tenant` when you enqueue (every enqueue / recurring / workflow overload takes an
+optional `tenant`):
+
+```csharp
+await scheduler.EnqueueAsync<ReportJob>(tenant: "acme");
+await scheduler.EnqueueWorkflowAsync("nightly-sync", tenant: "globex");
+scheduler.AddOrUpdateRecurring<ReportJob>("acme-nightly", "0 2 * * *", tenant: "acme");
+```
+
+The tenant rides through to the worker as `KLASSD_TENANT`, and the worker layers
+**tenant-specific configuration over the shared base** before building the job:
+
+```
+appsettings.json → appsettings.{ENV}.json → appsettings.{tenant}.json
+  → /secrets/*.json → /secrets/{tenant}/*.json → environment variables
+```
+
+So a job just reads its injected `IConfiguration` and gets tenant-scoped values automatically.
+Two ways to branch on the tenant:
+
+```csharp
+public sealed class ReportJob : IJob
+{
+    // Register tenant-specific dependencies — the tenant is on the config:
+    public static void Configure(IServiceCollection services, IConfiguration cfg)
+    {
+        var tenant = cfg[WorkerProtocol.ConfigTenantKey];       // null when not multi-tenant
+        services.AddSingleton<IReportSink>(tenant == "acme"
+            ? new S3Sink(cfg["acme:bucket"]!)
+            : new LocalSink());
+    }
+
+    public async Task RunAsync(IJobContext ctx)
+    {
+        ctx.Log($"running for {ctx.Tenant ?? "(no tenant)"}");  // also on the context at runtime
+    }
+}
+```
+
+Workflow nodes inherit the run's tenant; recurring definitions keep theirs across fires.
+
 ### Pod resources (requests / limits)
 
 Set them two ways; they merge **field-by-field**, lowest to highest precedence:
@@ -450,7 +494,8 @@ The scheduler launches this exe once per job, passing the **dispatch key** in th
 worker looks the key up in the registry and constructs the matching job. Jobs are built with
 `ActivatorUtilities`, so they can take constructor dependencies registered via `ConfigureServices`
 (or use an explicit factory) — composing configuration from `appsettings[.{ENV}].json`,
-`/secrets/*.json`, then environment variables.
+`/secrets/*.json`, then environment variables (plus the per-tenant overlays above when a run
+carries a tenant).
 
 The scheduler host registers the **same** jobs so the catalog and workflow-node validation agree on
 the keys — put the registration in a shared method both reference:
